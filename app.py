@@ -1,16 +1,16 @@
 from flask import Flask, jsonify
 import requests
-from bs4 import BeautifulSoup
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
 def check_mlbb_api(user_id, server_id):
-    url = "https://speedyninja.co/sg/product/mobile-legends-special-promo/check-id"
+    url = "https://api.elitedias.com/checkid"
     params = {
-        "user_id": user_id,
-        "server_id": server_id,
+        "userid": user_id,
+        "serverid": server_id,
+        "game": "mlbb_special"
     }
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15"
@@ -18,17 +18,17 @@ def check_mlbb_api(user_id, server_id):
 
     try:
         response = requests.post(url, data=params, headers=headers, timeout=10)
-        response.raise_for_status()  # Check for HTTP errors
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Find username (adjust selector based on real HTML)
-        username_element = soup.find('span', class_='username')  # Guessing class
-        if username_element:
-            username = username_element.text.strip()
-            return {"status": True, "nickname": username}
-        return {"status": False, "nickname": "Invalid ID or Server"}
+        response.raise_for_status()
+        data = response.json()
+        print(f"EliteDias Response: {data}")
+        # Check for username field (guessing "username" or "nickName")
+        if "username" in data and data.get("status") == "success":
+            return {"status": True, "nickname": data["username"]}
+        elif "nickName" in data:
+            return {"status": True, "nickname": data["nickName"]}
+        return {"status": False, "nickname": f"Invalid: {data.get('message', 'Unknown')}"}
     except requests.Timeout:
-        print("Error: SpeedyNinja timed out")
+        print("Error: EliteDias timed out")
         return {"status": False, "nickname": "API Timeout"}
     except Exception as e:
         print(f"Error: {str(e)}")
