@@ -8,10 +8,10 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# Smile One SANDBOX credentials
-SMILE_EMAIL = "agent@smileone.com"
-SMILE_UID = "1041302"
-SMILE_KEY = "7f663422060edd50b326b8a570639dac"
+# Your REAL Smile One credentials
+SMILE_EMAIL = "shengjunton4me@gmail.com"
+SMILE_UID = "1339650"
+SMILE_KEY = os.getenv("SMILE_KEY")  # Set in Render Environment
 
 def make_sign(params):
     sorted_params = sorted(params.items())
@@ -19,25 +19,29 @@ def make_sign(params):
     return hashlib.md5(hashlib.md5(sign_str.encode()).hexdigest().encode()).hexdigest()
 
 def check_mlbb_api(user_id, server_id):
-    url = "https://frontsmie.smile.one/smilecoin/api/getrole"  # Sandbox URL
+    url = "https://www.smile.one/smilecoin/api/getrole"  # Production URL
     params = {
         "email": SMILE_EMAIL,
         "uid": SMILE_UID,
         "userid": user_id,
         "zoneid": server_id,
         "product": "mobilelegends",
-        "productid": "13",        # Default product ID
+        "productid": "13",
         "time": int(time.time()),
     }
     params["sign"] = make_sign(params)
 
     try:
-        response = requests.post(url, data=params)
+        # Add a timeout to avoid hanging
+        response = requests.post(url, data=params, timeout=10)  # 10-second timeout
         data = response.json()
-        print(f"Smile One Response: {data}")  # Log the full response
+        print(f"Smile One Response: {data}")
         if data.get("status") == 200:
             return {"status": True, "nickname": data["username"]}
-        return {"status": False, "nickname": "Invalid ID or Server"}
+        return {"status": False, "nickname": f"Invalid: {data.get('message', 'Unknown')}"}
+    except requests.Timeout:
+        print("Error: Smile One API timed out")
+        return {"status": False, "nickname": "API Timeout"}
     except Exception as e:
         print(f"Error: {str(e)}")
         return {"status": False, "nickname": "Error"}
