@@ -1,3 +1,7 @@
+import os
+from flask import Flask, jsonify
+import requests
+from flask_cors import CORS
 from flask import Flask, jsonify
 import requests
 from flask_cors import CORS
@@ -8,7 +12,7 @@ CORS(app)
 def check_mlbb_api(user_id, server_id):
     url = f"https://id-game-checker.p.rapidapi.com/mobile-legends/{user_id}/{server_id}"
     headers = {
-        "X-RapidAPI-Key": "1942e13bb9mshc94165470a8972fp1127a4jsnd1f4b64cfe45",
+        "X-RapidAPI-Key": os.getenv("RAPIDAPI_KEY"),
         "X-RapidAPI-Host": "id-game-checker.p.rapidapi.com"
     }
     try:
