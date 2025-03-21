@@ -1,50 +1,38 @@
 from flask import Flask, jsonify
 import requests
-import time
-import hashlib
-import os
+from bs4 import BeautifulSoup
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
-# Your REAL Smile One credentials
-SMILE_EMAIL = "shengjunton4me@gmail.com"
-SMILE_UID = "1339650"
-SMILE_KEY = os.getenv("SMILE_KEY")
-
-def make_sign(params):
-    sorted_params = sorted(params.items())
-    sign_str = "".join(f"{k}={v}&" for k, v in sorted_params) + SMILE_KEY
-    return hashlib.md5(hashlib.md5(sign_str.encode()).hexdigest().encode()).hexdigest()
-
 def check_mlbb_api(user_id, server_id):
-    url = "https://www.smile.one/smilecoin/api/getrole"
+    url = "https://speedyninja.co/sg/product/mobile-legends-special-promo/check-id"
     params = {
-        "email": SMILE_EMAIL,
-        "uid": SMILE_UID,
-        "userid": user_id,
-        "zoneid": server_id,
-        "product": "mobilelegends",
-        "productid": "13",
-        "time": int(time.time()),
+        "user_id": user_id,
+        "server_id": server_id,
     }
-    params["sign"] = make_sign(params)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15"
+    }
 
     try:
-        response = requests.post(url, data=params, timeout=10)
-        data = response.json()
-        print(f"Smile One Response: {data}")
-        if data.get("status") == 200:
-            return {"status": True, "nickname": data["username"]}
-        # Return full response if not 200
-        return {"status": False, "nickname": f"Invalid - Full Response: {data}"}
+        response = requests.post(url, data=params, headers=headers, timeout=10)
+        response.raise_for_status()  # Check for HTTP errors
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Find username (adjust selector based on real HTML)
+        username_element = soup.find('span', class_='username')  # Guessing class
+        if username_element:
+            username = username_element.text.strip()
+            return {"status": True, "nickname": username}
+        return {"status": False, "nickname": "Invalid ID or Server"}
     except requests.Timeout:
-        print("Error: Smile One API timed out")
+        print("Error: SpeedyNinja timed out")
         return {"status": False, "nickname": "API Timeout"}
     except Exception as e:
         print(f"Error: {str(e)}")
-        return {"status": False, "nickname": "Error"}
+        return {"status": False, "nickname": f"Error: {str(e)}"}
 
 @app.route('/')
 def home():
