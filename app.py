@@ -1,29 +1,35 @@
 from flask import Flask, jsonify
 import requests
 from flask_cors import CORS
+import json
 
 app = Flask(__name__)
 CORS(app)
 
 def check_mlbb_api(user_id, server_id):
-    url = "https://www.jollymax.com/global/checkIdAndServer"  # Adjust after Network check
-    params = {
+    url = "https://api.jollymax.com/jolly-gateway/topup/order/check-uid"
+    payload = {
         "gameId": "mlbb",
         "userId": user_id,
         "serverId": server_id
     }
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
-        "Accept": "application/json",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+        "Accept": "application/json, text/plain, */*",
+        "Content-Type": "application/json",
+        "Origin": "https://www.jollymax.com",
+        "Referer": "https://www.jollymax.com/"
     }
 
     try:
-        response = requests.post(url, data=params, headers=headers, timeout=10)
+        response = requests.post(url, data=json.dumps(payload), headers=headers, timeout=10)
         response.raise_for_status()
+        raw_text = response.text
+        print(f"JollyMax Raw Response: {raw_text}")
         data = response.json()
-        print(f"JollyMax Response: {data}")
-        if data.get("status") == "success" and "nickName" in data:
+        print(f"JollyMax JSON Response: {data}")
+        # Adjust based on real response
+        if "nickName" in data:
             return {"status": True, "nickname": data["nickName"]}
         elif "username" in data:
             return {"status": True, "nickname": data["username"]}
