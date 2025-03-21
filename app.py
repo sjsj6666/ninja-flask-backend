@@ -8,33 +8,33 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# Your Smile One credentials
-SMILE_EMAIL = "shengjunton4me@gmail.com"
-SMILE_UID = "1339650"
-SMILE_KEY = os.getenv("SMILE_KEY")
+# Smile One SANDBOX credentials
+SMILE_EMAIL = "agent@smileone.com"
+SMILE_UID = "1041302"
+SMILE_KEY = "7f663422060edd50b326b8a570639dac"
 
 def make_sign(params):
-    # Sort params and create sign
     sorted_params = sorted(params.items())
     sign_str = "".join(f"{k}={v}&" for k, v in sorted_params) + SMILE_KEY
     return hashlib.md5(hashlib.md5(sign_str.encode()).hexdigest().encode()).hexdigest()
 
 def check_mlbb_api(user_id, server_id):
-    url = "https://www.smile.one/smilecoin/api/getrole"
+    url = "https://frontsmie.smile.one/smilecoin/api/getrole"  # Sandbox URL
     params = {
         "email": SMILE_EMAIL,
         "uid": SMILE_UID,
-        "userid": user_id,        # MLBB Player ID
-        "zoneid": server_id,      # MLBB Server ID
+        "userid": user_id,
+        "zoneid": server_id,
         "product": "mobilelegends",
-        "productid": "13",        # Default product ID (78+8 diamonds)
-        "time": int(time.time()), # Current timestamp
+        "productid": "13",        # Default product ID
+        "time": int(time.time()),
     }
     params["sign"] = make_sign(params)
 
     try:
         response = requests.post(url, data=params)
         data = response.json()
+        print(f"Smile One Response: {data}")  # Log the full response
         if data.get("status") == 200:
             return {"status": True, "nickname": data["username"]}
         return {"status": False, "nickname": "Invalid ID or Server"}
