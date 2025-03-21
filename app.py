@@ -2,6 +2,7 @@ from flask import Flask, jsonify
 import requests
 import time
 import hashlib
+import os
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -10,7 +11,7 @@ CORS(app)
 # Your Smile One credentials
 SMILE_EMAIL = "shengjunton4me@gmail.com"
 SMILE_UID = "1339650"
-SMILE_KEY = "9df98ad38dc0dfb8b9f6efa1695bc3d5"
+SMILE_KEY = os.getenv("SMILE_KEY")"
 
 def make_sign(params):
     # Sort params and create sign
