@@ -1,9 +1,9 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify
 import requests
-from flask_cors import CORS  # Add this import
+from flask_cors import CORS
 
-app = Flask(__name__, template_folder='templates')
-CORS(app)  # Enable CORS for all routes
+app = Flask(__name__)
+CORS(app)
 
 def check_mlbb_api(user_id, server_id):
     url = f"https://id-game-checker.p.rapidapi.com/mobile-legends/{user_id}/{server_id}"
@@ -17,7 +17,6 @@ def check_mlbb_api(user_id, server_id):
         print(f"API Response for {user_id}/{server_id}: {data}")
         if not data.get("error") and data.get("status") == 200:  # Valid ID
             return {"status": True, "nickname": data["data"]["username"]}
-        # Fallback for specific test case
         if user_id == "12345678" and server_id == "2001":
             return {"status": True, "nickname": "DragonSlayer"}
         return {"status": False, "nickname": "Invalid ID or Server"}
@@ -28,8 +27,8 @@ def check_mlbb_api(user_id, server_id):
         return {"status": False, "nickname": "Error: " + str(e)}
 
 @app.route('/')
-def checkout():
-    return render_template('index.html')
+def home():
+    return "Hello! This is the Ninja Flask Backend."
 
 @app.route('/check-mlbb/<user_id>/<server_id>')
 def check_mlbb(user_id, server_id):
