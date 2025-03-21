@@ -13,7 +13,7 @@ def check_mlbb_api(user_id, server_id):
         "userId": user_id,
         "serverId": server_id,
         "country": "SG",
-        "goodsId": "25",
+        "goodsId": "13",
         "appId": "mlbb"
     }
     headers = {
