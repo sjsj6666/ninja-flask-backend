@@ -24,25 +24,16 @@ def check_mlbb_api(user_id, server_id):
     try:
         response = requests.post(url, data=params, headers=headers, timeout=10)
         response.raise_for_status()
-        # Log raw text first
         raw_text = response.text
         print(f"Smile One Raw Response: {raw_text}")
-        # Try parsing as JSON
         try:
             data = response.json()
             print(f"Smile One JSON Response: {data}")
-            if "username" in data:
-                return {"status": True, "nickname": data["username"]}
-            elif "nickName" in data:
-                return {"status": True, "nickname": data["nickName"]}
-            # If username is in message or raw, use it
-            elif "〆Gemini、子" in raw_text:  # Temporary check
-                return {"status": True, "nickname": "〆Gemini、子"}
-            return {"status": False, "nickname": f"Invalid: {data.get('message', raw_text)}"}
+            if data.get("code") == 200 and "message" in data:
+                return {"status": True, "nickname": data["message"]}
+            return {"status": False, "nickname": f"Invalid: {data.get('message', 'Unknown')}"}
         except ValueError:
-            # Non-JSON fallback
-            if "〆Gemini、子" in raw_text:
-                return {"status": True, "nickname": "〆Gemini、子"}
+            print("Error: Response not JSON")
             return {"status": False, "nickname": f"Invalid ID or Server: {raw_text}"}
     except requests.Timeout:
         print("Error: Smile One timed out")
