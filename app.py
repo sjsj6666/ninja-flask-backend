@@ -11,7 +11,7 @@ CORS(app)
 # Your Smile One credentials
 SMILE_EMAIL = "shengjunton4me@gmail.com"
 SMILE_UID = "1339650"
-SMILE_KEY = os.getenv("SMILE_KEY")"
+SMILE_KEY = os.getenv("SMILE_KEY")
 
 def make_sign(params):
     # Sort params and create sign
