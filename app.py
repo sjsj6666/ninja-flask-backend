@@ -11,7 +11,7 @@ CORS(app)
 # Your REAL Smile One credentials
 SMILE_EMAIL = "shengjunton4me@gmail.com"
 SMILE_UID = "1339650"
-SMILE_KEY = os.getenv("SMILE_KEY")  # Set in Render Environment
+SMILE_KEY = os.getenv("SMILE_KEY")
 
 def make_sign(params):
     sorted_params = sorted(params.items())
@@ -19,7 +19,7 @@ def make_sign(params):
     return hashlib.md5(hashlib.md5(sign_str.encode()).hexdigest().encode()).hexdigest()
 
 def check_mlbb_api(user_id, server_id):
-    url = "https://www.smile.one/smilecoin/api/getrole"  # Production URL
+    url = "https://www.smile.one/smilecoin/api/getrole"
     params = {
         "email": SMILE_EMAIL,
         "uid": SMILE_UID,
@@ -32,13 +32,13 @@ def check_mlbb_api(user_id, server_id):
     params["sign"] = make_sign(params)
 
     try:
-        # Add a timeout to avoid hanging
-        response = requests.post(url, data=params, timeout=10)  # 10-second timeout
+        response = requests.post(url, data=params, timeout=10)
         data = response.json()
         print(f"Smile One Response: {data}")
         if data.get("status") == 200:
             return {"status": True, "nickname": data["username"]}
-        return {"status": False, "nickname": f"Invalid: {data.get('message', 'Unknown')}"}
+        # Return full response if not 200
+        return {"status": False, "nickname": f"Invalid - Full Response: {data}"}
     except requests.Timeout:
         print("Error: Smile One API timed out")
         return {"status": False, "nickname": "API Timeout"}
