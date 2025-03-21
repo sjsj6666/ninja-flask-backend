@@ -1,34 +1,45 @@
-import os
 from flask import Flask, jsonify
 import requests
-from flask_cors import CORS
-from flask import Flask, jsonify
-import requests
+import time
+import hashlib
 from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
 
+# Your Smile One credentials
+SMILE_EMAIL = "shengjunton4me@gmail.com"
+SMILE_UID = "1339650"
+SMILE_KEY = "9df98ad38dc0dfb8b9f6efa1695bc3d5"
+
+def make_sign(params):
+    # Sort params and create sign
+    sorted_params = sorted(params.items())
+    sign_str = "".join(f"{k}={v}&" for k, v in sorted_params) + SMILE_KEY
+    return hashlib.md5(hashlib.md5(sign_str.encode()).hexdigest().encode()).hexdigest()
+
 def check_mlbb_api(user_id, server_id):
-    url = f"https://id-game-checker.p.rapidapi.com/mobile-legends/{user_id}/{server_id}"
-    headers = {
-        "X-RapidAPI-Key": os.getenv("RAPIDAPI_KEY"),
-        "X-RapidAPI-Host": "id-game-checker.p.rapidapi.com"
+    url = "https://www.smile.one/smilecoin/api/getrole"
+    params = {
+        "email": SMILE_EMAIL,
+        "uid": SMILE_UID,
+        "userid": user_id,        # MLBB Player ID
+        "zoneid": server_id,      # MLBB Server ID
+        "product": "mobilelegends",
+        "productid": "13",        # Default product ID (78+8 diamonds)
+        "time": int(time.time()), # Current timestamp
     }
+    params["sign"] = make_sign(params)
+
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.post(url, data=params)
         data = response.json()
-        print(f"API Response for {user_id}/{server_id}: {data}")
-        if not data.get("error") and data.get("status") == 200:  # Valid ID
-            return {"status": True, "nickname": data["data"]["username"]}
-        if user_id == "12345678" and server_id == "2001":
-            return {"status": True, "nickname": "DragonSlayer"}
+        if data.get("status") == 200:
+            return {"status": True, "nickname": data["username"]}
         return {"status": False, "nickname": "Invalid ID or Server"}
     except Exception as e:
-        print(f"Error for {user_id}/{server_id}: {str(e)}")
-        if user_id == "12345678" and server_id == "2001":
-            return {"status": True, "nickname": "DragonSlayer"}
-        return {"status": False, "nickname": "Error: " + str(e)}
+        print(f"Error: {str(e)}")
+        return {"status": False, "nickname": "Error"}
 
 @app.route('/')
 def home():
