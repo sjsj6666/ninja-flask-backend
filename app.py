@@ -13,7 +13,17 @@ def check_mlbb_api(user_id, server_id):
         "game": "mlbb_special"
     }
     headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15"
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
+        "Accept": "*/*",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": "en-SG,en-GB;q=0.9,en;q=0.8",
+        "Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+        "Origin": "https://speedyninja.co",
+        "Referer": "https://speedyninja.co/",
+        "Priority": "u=3, i",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "cross-site"
     }
 
     try:
@@ -21,7 +31,6 @@ def check_mlbb_api(user_id, server_id):
         response.raise_for_status()
         data = response.json()
         print(f"EliteDias Response: {data}")
-        # Check for username field (guessing "username" or "nickName")
         if "username" in data and data.get("status") == "success":
             return {"status": True, "nickname": data["username"]}
         elif "nickName" in data:
