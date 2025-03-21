@@ -6,37 +6,32 @@ app = Flask(__name__)
 CORS(app)
 
 def check_mlbb_api(user_id, server_id):
-    url = "https://www.smile.one/smilecode/smilecode/queryrole"
+    url = "https://www.jollymax.com/global/checkIdAndServer"  # Adjust after Network check
     params = {
-        "name": "mobilelegendsph",
-        "user_id": user_id,
-        "server_id": server_id
+        "gameId": "mlbb",
+        "userId": user_id,
+        "serverId": server_id
     }
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
         "Accept": "application/json",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "Origin": "https://www.smile.one",
-        "Referer": "https://www.smile.one/smilecode/smilecode/product?a=bW9iaWxlbGVnZW5kc3Bo&name=TW9iaWxlIExlZ2VuZHMgTW9iaWxlIExlZ2VuZHM6IEJhbmcgQmFuZyBQSA==&type=Mw==",
-        "Cookie": "PHPSESSID=ejhpiht0fal17bd25smd2e91nu; cf_clearance=FH.T5kuAxZjMNJmbLamJG0S_PqO1zzvlz4FP9z9EgCQ-1742527918-1.2.1.1-B3nrGxYk4vmTqqhXfBCIr713ybN2qLvujm74gYHV3AP7Gk7rQI0B_erQenPavEqTxv381jhpPlYsMtQHA.xjeXXDoDpm.BMJCIHdN8GA810pIREtUvd_qH8JD9rXZHUzzA7s6OPrDtmKFta_cgF0lrljaiBc_jVNo_HtR5Eg7FzirccqyfEpDa2xVWFXI4IDYsgKvZ_zl8GQx_8VmG1LlA6fo7jjwxm_.IYteRU6F1uGj_sSDOCfyDn_3vxl6kq2hb0kw79LY1OI4MJSxTCvveuESOVFnsfosjPASTuFCrMslW9Q_pgvlW3sgPFiQA9gqFxMMcup8wq0LwZApxGLzazXvGg1Q3iTD68QULNIRDM"
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
     }
 
     try:
         response = requests.post(url, data=params, headers=headers, timeout=10)
         response.raise_for_status()
-        raw_text = response.text
-        print(f"Smile One Raw Response: {raw_text}")
-        try:
-            data = response.json()
-            print(f"Smile One JSON Response: {data}")
-            if data.get("code") == 200 and "message" in data:
-                return {"status": True, "nickname": data["message"]}
-            return {"status": False, "nickname": f"Invalid: {data.get('message', 'Unknown')}"}
-        except ValueError:
-            print("Error: Response not JSON")
-            return {"status": False, "nickname": f"Invalid ID or Server: {raw_text}"}
+        data = response.json()
+        print(f"JollyMax Response: {data}")
+        if data.get("status") == "success" and "nickName" in data:
+            return {"status": True, "nickname": data["nickName"]}
+        elif "username" in data:
+            return {"status": True, "nickname": data["username"]}
+        elif "message" in data and "〆Gemini、子" in data["message"]:
+            return {"status": True, "nickname": data["message"]}
+        return {"status": False, "nickname": f"Invalid: {data.get('message', 'Unknown')}"}
     except requests.Timeout:
-        print("Error: Smile One timed out")
+        print("Error: JollyMax timed out")
         return {"status": False, "nickname": "API Timeout"}
     except Exception as e:
         print(f"Error: {str(e)}")
