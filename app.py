@@ -1,3 +1,22 @@
+from flask import Flask, jsonify
+import requests
+from flask_cors import CORS
+import os
+
+app = Flask(__name__)
+CORS(app)
+
+port = int(os.environ.get("PORT", 5000))
+
+SMILE_ONE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "Origin": "https://www.smile.one",
+    "X-Requested-With": "XMLHttpRequest",
+    "Cookie": os.environ.get("SMILE_ONE_COOKIE", "PHPSESSID=ejhpiht0fal17bd25smd2e91nu; cf_clearance=...")  # Ensure this is set in Render
+}
+
 def check_smile_one_api(game, uid, server_id):
     endpoints = {
         "mobile-legends": "https://www.smile.one/merchant/mobilelegends/checkrole",
@@ -10,8 +29,8 @@ def check_smile_one_api(game, uid, server_id):
 
     url = endpoints[game]
     SMILE_ONE_HEADERS["Referer"] = (
-        "https://www.smile.one/merchant/mobilelegends" if game == "mobile-legends" 
-        else "https://www.smile.one/ru/merchant/genshinimpact" if game == "genshin-impact" 
+        "https://www.smile.one/merchant/mobilelegends" if game == "mobile-legends"
+        else "https://www.smile.one/ru/merchant/genshinimpact" if game == "genshin-impact"
         else "https://www.smile.one/merchant/honkai"
     )
     
@@ -36,14 +55,17 @@ def check_smile_one_api(game, uid, server_id):
         print(f"Smile One JSON Response for {game}: {data}")
         
         if data.get("code") == 200:
-            if game == "mobile-legends" and "username" in data and data["username"]:
-                return {"status": "success", "username": data["username"]}
+            if game == "mobile-legends":
+                username = data.get("username")
+                if username:
+                    return {"status": "success", "username": username}
+                return {"status": "error", "message": "Username not found"}
             elif game == "honkai-star-rail":
-                # Check if username exists in response; Smile One might return it as 'role_name' or similar
+                # Assuming Smile One returns a username field (e.g., "username", "role_name", or "nickname")
                 username = data.get("username") or data.get("role_name") or data.get("nickname")
                 if username:
                     return {"status": "success", "username": username}
-                return {"status": "success", "message": "UID and Server verified"}  # Fallback if no username
+                return {"status": "success", "message": "UID and Server verified"}  # Fallback
             elif game == "genshin-impact":
                 return {"status": "success", "message": "Account Verified"}
         return {"status": "error", "message": data.get("message", "Invalid UID or Server")}
@@ -56,3 +78,15 @@ def check_smile_one_api(game, uid, server_id):
     except ValueError as e:
         print(f"Error parsing JSON for {game}: {str(e)} - Raw: {raw_text}")
         return {"status": "error", "message": "Invalid response format"}
+
+@app.route('/')
+def home():
+    return "Hello! This is the Ninja Flask Backend."
+
+@app.route('/check-smile/<game>/<uid>/<server_id>', methods=['GET'])
+def check_smile_one(game, uid, server_id):
+    result = check_smile_one_api(game, uid, server_id)
+    return jsonify(result)
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=port, debug=False)
