@@ -1,9 +1,13 @@
 from flask import Flask, jsonify
 import requests
 from flask_cors import CORS
+import os
 
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Enable CORS for all routes
+
+# Configuration for deployment (e.g., Render sets PORT env variable)
+port = int(os.environ.get("PORT", 5000))
 
 def check_mlbb_api(user_id, server_id):
     url = "https://www.smile.one/merchant/mobilelegends/checkrole"
@@ -38,8 +42,42 @@ def check_mlbb_api(user_id, server_id):
         print("Error: Smile One timed out")
         return {"status": False, "nickname": "API Timeout"}
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error checking MLBB: {str(e)}")
         return {"status": False, "nickname": f"Error: {str(e)}"}
+
+def check_razer_gold_api(game, uid, server_id):
+    base_url = "https://gold.razer.com/api/ext"
+    endpoints = {
+        "honkai-star-rail": f"{base_url}/custom/mihoyo-honkai-star-rail/users/{uid}",
+        "zenless-zone-zero": f"{base_url}/custom/cognosphere-zenless-zone-zero/users/{uid}",
+        "genshin-impact": f"{base_url}/genshinimpact/users/{uid}"
+    }
+
+    if game not in endpoints:
+        return {"status": "error", "message": "Invalid game"}
+
+    url = f"{endpoints[game]}?serverId={server_id}"
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
+        # Add Cookie or API key here if required by Razer Gold
+        # "Cookie": "your_cookie_here"
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        print(f"Razer Gold Response for {game}: {data}")
+        if data.get("status") == "success" and "nickname" in data:
+            return {"status": "success", "nickname": data["nickname"]}
+        return {"status": "error", "message": data.get("message", "Invalid UID or Server")}
+    except requests.Timeout:
+        print(f"Error: Razer Gold timed out for {game}")
+        return {"status": "error", "message": "API Timeout"}
+    except Exception as e:
+        print(f"Error checking {game} UID: {str(e)}")
+        return {"status": "error", "message": f"Error: {str(e)}"}
 
 @app.route('/')
 def home():
@@ -50,5 +88,10 @@ def check_mlbb(user_id, server_id):
     result = check_mlbb_api(user_id, server_id)
     return jsonify({'username': result['nickname']})
 
+@app.route('/check-razer/<game>/<uid>/<server_id>', methods=['GET'])
+def check_razer_gold(game, uid, server_id):
+    result = check_razer_gold_api(game, uid, server_id)
+    return jsonify(result)
+
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True)
