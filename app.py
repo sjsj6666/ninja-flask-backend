@@ -13,8 +13,9 @@ SMILE_ONE_HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "Origin": "https://www.smile.one",
-    "Referer": "https://www.smile.one/ru/merchant/genshinimpact",
-    "Cookie": os.environ.get("SMILE_ONE_COOKIE", "PHPSESSID=ejhpiht0fal17bd25smd2e91nu; cf_clearance=54PNbJJykj74253lEBL3lhST2ojhlCG6fFZhjlZJs7g-1742613814-1.2.1.1-xDV1MmpU...")
+    "Referer": "https://www.smile.one/merchant/honkai",
+    "X-Requested-With": "XMLHttpRequest",
+    "Cookie": os.environ.get("SMILE_ONE_COOKIE", "PHPSESSID=ejhpiht0fal17bd25smd2e91nu; cf_clearance=G9wXc39MaI28uqvi8GIZe52wsmH4LdiVDGZxLCx.BG0-1742661501-1.2.1.1-SP5DtI_TyUfB6xDxd9j6f8EOSHmjStqhqIHFqrzEwdqc9.8SCv4mURAwf.nxvVWR9O9GM9P51uGX9WwT36GJX_M6v._d0Zwd5n9g4KzqRfPtgo9Yahl4jB9w6Yh79HAcouEr4IzSt8sQYyOJq18cyuHA33.NYTf6TEu8qkZTA9s7QioyAK72A4rmEpwe22BiKIhK9mM..IEJjoeXbtQt7uTUC3RnZSSZWfewVWxBvD9OyEi1t577KhnRAGeoJ24ifleIcp2eRD8vSd7g1Xm3KaUt1DMMuls8mwIMr4byiNIQZ7n0YZfZu3rN_ldkQwfH1Yimpekzlail7397.zwhKYf5sSJUw7KrUjfE_WC1VUU; ...")
 }
 
 RAZER_GOLD_HEADERS = {
@@ -22,13 +23,16 @@ RAZER_GOLD_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Encoding": "gzip, deflate, br",
     "Accept-Language": "en-SG,en-GB;q=0.9,en;q=0.8",
-    "Cookie": os.environ.get("RAZER_GOLD_COOKIE", "_ga=GA1.2.1238030224.1736596983; _gid=GA1.2.2042942313.1742611402; RazerIDLanguage=en; ...")  # Full cookie from your request
+    "Cookie": os.environ.get("RAZER_GOLD_COOKIE", ""),
+    "Referer": "https://gold.razer.com/ph/en/gold/catalog/zenless-zone-zero",
+    "Origin": "https://gold.razer.com"
 }
 
 def check_smile_one_api(game, uid, server_id):
     endpoints = {
         "mobile-legends": "https://www.smile.one/merchant/mobilelegends/checkrole",
-        "genshin-impact": "https://www.smile.one/ru/merchant/genshinimpact/checkrole"
+        "genshin-impact": "https://www.smile.one/ru/merchant/genshinimpact/checkrole",
+        "honkai-star-rail": "https://www.smile.one/br/merchant/honkai/checkrole"
     }
 
     if game not in endpoints:
@@ -38,10 +42,10 @@ def check_smile_one_api(game, uid, server_id):
     params = {
         "uid": uid,
         "sid": server_id,
-        "pid": "19731" if game == "genshin-impact" else "25",
+        "pid": "18356" if game == "honkai-star-rail" else "19731" if game == "genshin-impact" else "25",
         "checkrole": "1",
         "pay_method": "",
-        "channel_method": ""
+        "channel_method": "" if game != "honkai-star-rail" else None  # HSR doesn’t use these
     }
 
     try:
@@ -55,7 +59,7 @@ def check_smile_one_api(game, uid, server_id):
         if data.get("code") == 200:
             if game == "mobile-legends" and "username" in data and data["username"]:
                 return {"status": "success", "nickname": data["username"]}
-            return {"status": "success", "message": "UID and Server verified"}
+            return {"status": "success", "message": "UID and Server verified", "data": data}
         return {"status": "error", "message": data.get("message", "Invalid UID or Server")}
     except requests.Timeout:
         print(f"Error: Smile One timed out for {game}")
@@ -111,3 +115,4 @@ def check_razer_gold(game, uid, server_id):
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=port, debug=False)
+    
