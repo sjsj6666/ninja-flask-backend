@@ -18,7 +18,7 @@ SMILE_ONE_HEADERS = {
     "Cookie": os.environ.get("SMILE_ONE_COOKIE", "PHPSESSID=ejhpiht0fal17bd25smd2e91nu; cf_clearance=...")
 }
 
-# Tokogame API Headers (for Honor of Kings name checker)
+# Tokogame API Headers
 TOKOGAME_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/plain, */*",
@@ -92,33 +92,29 @@ def check_smile_one_api(game, uid, server_id):
         print(f"Error parsing JSON for {game}: {str(e)} - Raw: {raw_text}")
         return {"status": "error", "message": "Invalid response format"}
 
-def check_honor_of_kings_name(uid, server_id, username):
+def check_honor_of_kings_name(uid):
     url = "https://api.tokogame.com/core/v1/orders/validate-order"
     payload = {
         "game": "honor-of-kings",
         "uid": uid,
-        "server_id": server_id,
-        "username": username
+        "productId": "hok_generic",  # Placeholder; replace with actual product ID if known
+        "questionnaireAnswers": "default"  # Placeholder; adjust based on API requirements
     }
 
     try:
         response = requests.post(url, json=payload, headers=TOKOGAME_HEADERS, timeout=10)
         response.raise_for_status()
         raw_text = response.text
-        print(f"Tokogame Raw Response for Honor of Kings (UID: {uid}, Server: {server_id}, Username: {username}): {raw_text}")
+        print(f"Tokogame Raw Response for Honor of Kings (UID: {uid}): {raw_text}")
         data = response.json()
         print(f"Tokogame JSON Response: {data}")
 
-        # Assuming a successful response (status 200) indicates validation
         if response.status_code == 200:
-            # Check if the API returns a username field to compare (adjust based on actual response)
             validated_username = data.get("username") or data.get("nickname") or data.get("player_name")
-            if validated_username and validated_username.lower() == username.lower():
-                return {"status": "success", "username": validated_username, "message": "Username validated"}
-            elif not validated_username:
-                return {"status": "success", "message": "UID and Server verified (username not returned)"}
-            return {"status": "error", "message": "Username mismatch"}
-        return {"status": "error", "message": data.get("message", "Invalid UID, Server, or Username")}
+            if validated_username:
+                return {"status": "success", "username": validated_username, "message": "Username retrieved"}
+            return {"status": "success", "message": "UID verified (no username returned)"}
+        return {"status": "error", "message": data.get("message", "Invalid UID")}
     except requests.Timeout:
         print(f"Error: Tokogame API timed out for Honor of Kings")
         return {"status": "error", "message": "API Timeout"}
@@ -138,9 +134,9 @@ def check_smile_one(game, uid, server_id):
     result = check_smile_one_api(game, uid, server_id)
     return jsonify(result)
 
-@app.route('/check-hok-name/<uid>/<server_id>/<username>', methods=['GET'])
-def check_hok_name(uid, server_id, username):
-    result = check_honor_of_kings_name(uid, server_id, username)
+@app.route('/check-hok-name/<uid>', methods=['GET'])
+def check_hok_name(uid):
+    result = check_honor_of_kings_name(uid)
     return jsonify(result)
 
 if __name__ == "__main__":
