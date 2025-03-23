@@ -97,9 +97,11 @@ def check_honor_of_kings_name(uid):
     payload = {
         "game": "honor-of-kings",
         "uid": uid,
-        "productId": "hok_generic",  # Placeholder; replace with actual product ID if known
-        "questionnaireAnswers": "default"  # Placeholder; adjust based on API requirements
+        "productId": "hok_generic",  # Placeholder; replace with actual value
+        "questionnaireAnswers": {"response": "default"},  # Adjusted to object format
+        "orderType": "validate"  # Added to indicate validation intent
     }
+    print(f"Tokogame Request Payload for Honor of Kings (UID: {uid}): {payload}")
 
     try:
         response = requests.post(url, json=payload, headers=TOKOGAME_HEADERS, timeout=10)
