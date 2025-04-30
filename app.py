@@ -4,9 +4,12 @@ import requests
 from flask_cors import CORS
 import os
 import logging # Added for better debugging
+import time # For timestamp
+import uuid # For traceid
 
 app = Flask(__name__)
-CORS(app)
+# Allow all origins for development, refine for production if needed
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -24,93 +27,86 @@ SMILE_ONE_HEADERS = {
     "Cookie": os.environ.get("SMILE_ONE_COOKIE", "YOUR_DEFAULT_SMILE_ONE_COOKIE_IF_NEEDED") # Replace with your actual fallback if needed
 }
 
-# --- Midasbuy Config (Hypothetical - Needs Verification) ---
-MIDASBUY_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", # From your log
-    "Accept": "application/json, text/plain, */*", # Common accept header for APIs
-    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    "Origin": "https://www.midasbuy.com", # Essential Header
-    "Referer": "https://www.midasbuy.com/midasbuy/sg/buy/pubgm", # Referer often important (adjust country if needed)
-    "X-Requested-With": "XMLHttpRequest", # Often needed for AJAX endpoints
-    # NOTE: Midasbuy might require cookies or other dynamic tokens.
-    # This implementation DOES NOT handle complex tokens like 'forterToken'.
+# --- Netease Identity V Config ---
+NETEASE_IDV_BASE_URL_TEMPLATE = "https://pay.neteasegames.com/gameclub/identityv/{server_code}/login-role" # Use a template
+NETEASE_IDV_HEADERS = { # Headers remain the same
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://pay.neteasegames.com/identityv/topup",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    # Omitting cookies initially based on log analysis
 }
-
-# PUBG Mobile App ID on Midasbuy (from your log's record0 parameter 24=...)
-# !!! Needs verification if this is the correct ID for the API call. !!!
-MIDASBUY_PUBGM_APPID = "1450015065"
-# Default Midasbuy country - may need to be adjusted or passed as parameter
-MIDASBUY_DEFAULT_COUNTRY = "sg" # Example from your log
+NETEASE_IDV_STATIC_PARAMS = {
+    "gc_client_version": "1.9.111",
+    "client_type": "gameclub"
+}
+# Mapping from user-friendly server name to API code
+IDV_SERVER_CODES = {
+    "asia": "2001",
+    "na-eu": "2011" # Combined NA/EU code based on log
+    # Add other servers if they exist and you find their codes
+}
 
 # --- API Check Functions ---
 
 def check_smile_one_api(game, uid, server_id):
+    # (This function remains unchanged)
     endpoints = {
         "mobile-legends": "https://www.smile.one/merchant/mobilelegends/checkrole",
         "genshin-impact": "https://www.smile.one/ru/merchant/genshinimpact/checkrole",
         "honkai-star-rail": "https://www.smile.one/br/merchant/honkai/checkrole"
-        # Add ZZZ endpoint if SmileOne supports it
-        # "zenless-zone-zero": "..."
     }
 
     if game not in endpoints:
         return {"status": "error", "message": f"Invalid game '{game}' for Smile One"}
 
     url = endpoints[game]
-    # Dynamically set referer based on game
-    current_headers = SMILE_ONE_HEADERS.copy() # Use a copy to avoid modifying global headers
+    current_headers = SMILE_ONE_HEADERS.copy()
     current_headers["Referer"] = (
         "https://www.smile.one/merchant/mobilelegends" if game == "mobile-legends"
         else "https://www.smile.one/ru/merchant/genshinimpact" if game == "genshin-impact"
-        else "https://www.smile.one/br/merchant/honkai" # Honkai Star Rail referer might need BR path
+        else "https://www.smile.one/br/merchant/honkai"
     )
 
     params = {
-        # Use correct PIDs for each game - VERIFY THESE
         "pid": "25" if game == "mobile-legends" else "19731" if game == "genshin-impact" else "18356" if game == "honkai-star-rail" else None,
         "checkrole": "1",
     }
     if params["pid"] is None:
          return {"status": "error", "message": f"PID not configured for game '{game}'"}
 
-
     if game == "mobile-legends":
         params["user_id"] = uid
         params["zone_id"] = server_id
-    elif game == "honkai-star-rail": # Assuming HSR uses uid/sid like Genshin for SmileOne
+    elif game == "honkai-star-rail" or game == "genshin-impact":
          params["uid"] = uid
-         params["sid"] = server_id # Assuming sid maps to server_id input
-    elif game == "genshin-impact":
-         params["uid"] = uid
-         params["sid"] = server_id # Assuming sid maps to server_id input
-    # Add ZZZ params if needed
+         params["sid"] = server_id
 
     logging.info(f"Sending Smile One request for {game}: URL={url}, Params={params}")
     try:
         response = requests.post(url, data=params, headers=current_headers, timeout=10)
-        response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
+        response.raise_for_status()
         raw_text = response.text
         logging.info(f"Smile One Raw Response for {game} (UID: {uid}, Server: {server_id}): {raw_text}")
 
         try:
             data = response.json()
             logging.info(f"Smile One JSON Response for {game}: {data}")
-
             if data.get("code") == 200:
-                # Try common keys for username
                 username = data.get("username") or data.get("role_name") or data.get("nickname")
                 if username:
                     return {"status": "success", "username": username}
-                # Handle cases where code is 200 but no username (Genshin, sometimes HSR)
                 elif game in ["genshin-impact", "honkai-star-rail"] and data.get("message", "").lower() == 'ok':
-                     return {"status": "success", "message": "Account Verified"} # Changed message slightly
-                else: # Code 200, but no username and not a known 'OK' message
+                     return {"status": "success", "message": "Account Verified"}
+                else:
                     logging.warning(f"Smile One check successful (Code: 200) for {game} but username not found. Data: {data}")
                     return {"status": "error", "message": "Username not found in successful response"}
-            else: # API returned a non-200 internal code
+            else:
                  logging.warning(f"Smile One check failed for {game} with API code {data.get('code')}: {data.get('message')}")
                  return {"status": "error", "message": data.get("message", f"Invalid UID/Server or API error code: {data.get('code')}")}
-        except ValueError: # Includes JSONDecodeError
+        except ValueError:
             logging.error(f"Error parsing JSON for Smile One {game}: - Raw Text: {raw_text}")
             return {"status": "error", "message": "Invalid response format from Smile One API"}
 
@@ -127,116 +123,112 @@ def check_smile_one_api(game, uid, server_id):
         elif status_code == 404: user_msg = "API Endpoint Not Found (404)"
         elif status_code >= 500: user_msg = f"API Server Error ({status_code})"
         return {"status": "error", "message": user_msg}
-    except Exception as e: # Catch any other unexpected errors
+    except Exception as e:
         logging.error(f"Unexpected error in check_smile_one_api for {game}, UID {uid}: {str(e)}")
         return {"status": "error", "message": "An unexpected error occurred"}
 
 
-# --- NEW: Midasbuy API Check Function ---
-def check_midasbuy_pubgm_api(uid, country=MIDASBUY_DEFAULT_COUNTRY):
-    """
-    Checks PUBG Mobile Player ID using a *hypothetical* Midasbuy endpoint.
-    **Endpoint URL, payload, and response structure MUST BE VERIFIED.**
-    Aims to return the full username.
-    """
-    # !! IMPORTANT: Verify this endpoint URL by checking Midasbuy website network traffic !!
-    # This is a GUESS based on common patterns. Find the REAL one.
-    url = "https://www.midasbuy.com/midasbuy/api/get_player_info" # <--- !!! GUESS - VERIFY !!!
+# --- NEW: Netease Identity V API Check Function ---
+def check_identityv_api(server, roleid):
+    """Checks Identity V Player ID for a specific server."""
 
-    # !! IMPORTANT: Verify the required payload keys !!
-    payload = {
-        "appid": MIDASBUY_PUBGM_APPID, # <--- !!! VERIFY this App ID !!!
-        "userid": uid,
-        "country": country,
-        # Add other parameters if the real API requires them (e.g., zoneid=1?)
+    server_code = IDV_SERVER_CODES.get(server.lower()) # Get the code, handle case
+    if not server_code:
+        logging.error(f"Invalid server provided for Identity V check: {server}")
+        return {"status": "error", "message": "Invalid server specified"}
+
+    # Build URL dynamically
+    url = NETEASE_IDV_BASE_URL_TEMPLATE.format(server_code=server_code)
+
+    current_timestamp = int(time.time() * 1000)
+    trace_id = str(uuid.uuid4())
+    # deviceid value from the log - **This might need dynamic generation or might be validated!**
+    # For testing, we use the one from the log, but it's likely tied to a specific browser session.
+    # If this fails, try omitting deviceid entirely.
+    device_id = "156032181698579111" # Hardcoded from log for now, may need removal/replacement
+
+    query_params = {
+        "roleid": roleid,
+        "timestamp": current_timestamp,
+        "traceid": trace_id,
+        "deviceid": device_id, # Included based on log, test omitting if it causes issues
+        **NETEASE_IDV_STATIC_PARAMS
     }
 
-    # Update Referer based on country if necessary
-    headers = MIDASBUY_HEADERS.copy()
-    headers["Referer"] = f"https://www.midasbuy.com/midasbuy/{country}/buy/pubgm"
-    headers["Origin"] = "https://www.midasbuy.com" # Ensure Origin matches the domain
+    headers = NETEASE_IDV_HEADERS.copy()
+    headers["X-TASK-ID"] = f"transid={trace_id},uni_transaction_id=default"
 
-    logging.info(f"Sending Midasbuy request for PUBGM: URL={url}, Payload={payload}, Headers={headers}")
+    logging.info(f"Sending Netease IDV request: URL={url}, Params={query_params}")
     try:
-        # Using Session object might help with potential cookie handling persistence if needed later
-        with requests.Session() as session:
-            # If you find required cookies, set them on the session:
-            # session.cookies.set('cookie_name', 'cookie_value', domain='.midasbuy.com')
-            response = session.post(url, data=payload, headers=headers, timeout=10)
-
+        response = requests.get(url, params=query_params, headers=headers, timeout=10)
         response.raise_for_status() # Check for HTTP errors first (4xx, 5xx)
+
         raw_text = response.text
-        logging.info(f"Midasbuy Raw Response for PUBGM (UID: {uid}): {raw_text}")
+        logging.info(f"Netease IDV Raw Response (Server: {server}, RoleID: {roleid}): {raw_text}")
 
         try:
             data = response.json()
-            logging.info(f"Midasbuy JSON Response for PUBGM: {data}")
+            logging.info(f"Netease IDV JSON Response: {data}")
 
-            # --- Response structure analysis needed ---
-            # **ASSUMPTION:** Midasbuy returns something like:
-            # {"code": 0, "message": "Success", "data": {"user_name": "PlayerNinja"}}
-            # OR {"ret": 0, "msg": "OK", "nickname": "PlayerNinja"}
-            # ** !!! YOU MUST ADJUST THIS based on the actual response! !!! **
+            # Adjust parsing based on the ACTUAL response structure
+            api_code = data.get("code", data.get("result", -1)) # Example: Netease might use "code"
+            api_message = data.get("message", data.get("msg", "Unknown")) # Example: Netease might use "message"
 
-            api_code = data.get("code", data.get("ret", -1)) # Check common code fields, default to -1 if none found
-            api_message = data.get("message", data.get("msg", "Unknown Error"))
-
-            if api_code == 0: # Often 0 means success
-                # Try to extract username from common fields - PRIORITIZE full name
+            if api_code == 200 or api_code == 0: # Common success codes
+                # Extract username - **VERIFY THIS PATH/KEY** based on actual JSON response
                 username = None
-                # Check nested 'data' dictionary first
                 if isinstance(data.get("data"), dict):
-                     username = data["data"].get("user_name") or data["data"].get("nickname") or data["data"].get("nick") or data["data"].get("role_name")
-                # Check top-level fields if not found in 'data'
+                    # Common nesting pattern: data -> nickname/name
+                    username = data["data"].get("nickname") or data["data"].get("name") or data["data"].get("role_name")
                 if not username:
-                     username = data.get("user_name") or data.get("nickname") or data.get("nick") or data.get("role_name")
+                     # Check top level if not in 'data'
+                     username = data.get("nickname") or data.get("name") or data.get("role_name")
 
                 if username:
-                    logging.info(f"Midasbuy PUBGM check SUCCESS for UID {uid}. Username: {username}")
-                    return {"status": "success", "username": username} # Return the username!
+                    logging.info(f"Netease IDV check SUCCESS (Server: {server}, RoleID: {roleid}). Username: {username}")
+                    return {"status": "success", "username": username}
                 else:
-                    # Successful response code but couldn't find username field
-                    logging.warning(f"Midasbuy PUBGM check successful (Code: {api_code}) but username field not found. UID: {uid}. Data: {data}")
-                    return {"status": "error", "message": "Player found, but username unavailable"} # Adjusted message
-            else:
-                # API returned an error code
-                logging.warning(f"Midasbuy PUBGM check FAILED with API code {api_code}: {api_message}. UID: {uid}")
-                # Make error message more user-friendly
-                error_msg_user = f"Invalid Player ID ({api_message})" if api_code != -1 else "Invalid Player ID or API Error"
-                return {"status": "error", "message": error_msg_user}
+                     # Success code but no username found?
+                     logging.warning(f"Netease IDV check successful (Code: {api_code}) but username field not found. RoleID: {roleid}. Data: {data}")
+                     if "ok" in api_message.lower() or "success" in api_message.lower():
+                         return {"status": "success", "message": "Role ID Verified"}
+                     else:
+                         return {"status": "error", "message": "Player found, but username unavailable"}
 
-        except ValueError: # Includes JSONDecodeError if response is not valid JSON
-            logging.error(f"Error parsing JSON for Midasbuy PUBGM: UID={uid}. Raw Text: {raw_text}")
-            # Check if it's an HTML response indicating login/block/error
-            if "<html" in raw_text.lower() or "login" in raw_text.lower() or "forbidden" in raw_text.lower() or "cloudflare" in raw_text.lower():
-                 logging.error("Midasbuy returned HTML/Error page, likely requires login/cookies/token or is blocked.")
-                 return {"status": "error", "message": "Midasbuy API check blocked"} # Simplified user message
+            # Handle specific Netease error codes/messages if known (e.g., role not found)
+            # Example: Netease might use code 40004 for 'role not exist' - VERIFY THIS
+            elif api_code == 40004 or "role not exist" in api_message.lower() or "role_not_exist" in api_message.lower():
+                logging.warning(f"Netease IDV check FAILED: Role not found. (Server: {server}, RoleID: {roleid})")
+                return {"status": "error", "message": "Invalid Role ID for this server"}
+            else:
+                # Generic error handling
+                logging.warning(f"Netease IDV check FAILED with API code {api_code}: {api_message}. (Server: {server}, RoleID: {roleid})")
+                # Try to return the specific message from the API
+                error_detail = f" ({api_message})" if api_message != "Unknown" else ""
+                return {"status": "error", "message": f"Invalid Role ID or API Error{error_detail}"}
+
+        except ValueError: # Includes JSONDecodeError
+            logging.error(f"Error parsing JSON for Netease IDV: (Server: {server}, RoleID: {roleid}). Raw Text: {raw_text}")
+            if "<html" in raw_text.lower() or "nginx" in raw_text.lower():
+                 return {"status": "error", "message": "Netease API check blocked or unavailable"}
             return {"status": "error", "message": "Invalid API response format"}
 
     except requests.Timeout:
-        logging.error(f"Error: Midasbuy timed out for PUBGM UID {uid}")
+        logging.error(f"Error: Netease IDV timed out for (Server: {server}, RoleID {roleid})")
         return {"status": "error", "message": "API Timeout"}
     except requests.RequestException as e:
         status_code = e.response.status_code if e.response is not None else "N/A"
         error_text = e.response.text if e.response else "No response body"
-        logging.error(f"Error checking Midasbuy PUBGM UID {uid}: Status={status_code}, Error={str(e)}, Response: {error_text}")
-        # Provide clearer user messages based on status code
+        logging.error(f"Error checking Netease IDV (Server: {server}, RoleID {roleid}): Status={status_code}, Error={str(e)}, Response: {error_text}")
         user_msg = f"API Connection Error ({status_code})"
-        if status_code == 403:
-             user_msg = "Midasbuy API Blocked (403)"
-        elif status_code == 401:
-             user_msg = "Midasbuy API Auth Error (401)"
-        elif status_code == 404:
-             user_msg = "Midasbuy API Not Found (404)"
-        elif status_code >= 500:
-             user_msg = f"Midasbuy Server Error ({status_code})"
-        # Add check for potential rate limiting (often 429)
-        elif status_code == 429:
-             user_msg = "Midasbuy API Rate Limited (429)"
-
+        if status_code == 403: user_msg = "Netease API Forbidden (403)"
+        elif status_code == 401: user_msg = "Netease API Auth Error (401)"
+        elif status_code == 404: user_msg = "Netease API Not Found (404)"
+        elif status_code == 429: user_msg = "Netease API Rate Limited (429)"
+        elif status_code >= 500: user_msg = f"Netease Server Error ({status_code})"
         return {"status": "error", "message": user_msg}
-    except Exception as e: # Catch any other unexpected errors during the process
-        logging.error(f"Unexpected error in check_midasbuy_pubgm_api for UID {uid}: {str(e)}")
+    except Exception as e:
+        logging.error(f"Unexpected error in check_identityv_api for (Server: {server}, RoleID {roleid}): {str(e)}")
         return {"status": "error", "message": "An unexpected error occurred"}
 
 
@@ -246,54 +238,63 @@ def check_midasbuy_pubgm_api(uid, country=MIDASBUY_DEFAULT_COUNTRY):
 def home():
     return "Hello! This is the Ninja Flask Backend."
 
+# --- Smile One Route (Unchanged) ---
 @app.route('/check-smile/<game>/<uid>/<server_id>', methods=['GET'])
 def check_smile_one(game, uid, server_id):
-    # Basic validation for UID/Server ID format can be added here if needed
     if not uid or not uid.isdigit():
         return jsonify({"status": "error", "message": "Invalid UID format"}), 400
     if game == 'mobile-legends' and (not server_id or not server_id.isdigit()):
          return jsonify({"status": "error", "message": "Invalid Server ID format for MLBB"}), 400
-    # Add similar checks for Genshin/HSR server IDs if they have specific formats
 
     result = check_smile_one_api(game, uid, server_id)
     status_code = 200
-    if result.get("status") == "error" and "Invalid UID/Server" in result.get("message", ""):
-        status_code = 400 # Bad Request for invalid ID/Server from API
-    elif result.get("status") == "error":
-         status_code = 500 # Internal Server Error for other API issues
+    if result.get("status") == "error":
+        if "Invalid UID/Server" in result.get("message", "") or \
+           "Invalid UID format" in result.get("message", "") or \
+           "Invalid Server ID format" in result.get("message", ""):
+            status_code = 400
+        else:
+            status_code = 500
 
     return jsonify(result), status_code
 
+# --- NEW: Route for Netease Identity V Check ---
+# Example: /check-netease/identityv/asia/839263
+# Example: /check-netease/identityv/na-eu/839263
+@app.route('/check-netease/identityv/<server>/<roleid>', methods=['GET'])
+def check_netease_identityv(server, roleid):
+    logging.info(f"Received Netease IDV check request for Server: {server}, RoleID: {roleid}")
 
-# --- NEW: Route for Midasbuy PUBG Mobile Check ---
-@app.route('/check-midasbuy/pubgm/<uid>', methods=['GET'])
-# Optional country route if needed later:
-# @app.route('/check-midasbuy/pubgm/<uid>/<country>', methods=['GET'])
-def check_midasbuy_pubgm(uid, country=None):
-    # Use provided country or default if route allows it, otherwise use constant
-    target_country = country if country else MIDASBUY_DEFAULT_COUNTRY
-    logging.info(f"Received Midasbuy check request for PUBGM UID: {uid}, Country: {target_country}")
+    # Validate server input against our known codes
+    if server.lower() not in IDV_SERVER_CODES:
+         logging.warning(f"Invalid Identity V server received: {server}")
+         return jsonify({"status": "error", "message": "Invalid server specified"}), 400
 
-    # Basic UID validation before calling API
-    if not uid or not uid.isdigit() or len(uid) < 5: # Basic length check for PUBGM IDs
-        logging.warning(f"Invalid PUBGM UID format received: {uid}")
-        return jsonify({"status": "error", "message": "Invalid Player ID format"}), 400 # Return 400 Bad Request
+    # Basic Role ID validation
+    if not roleid or not roleid.isdigit():
+        logging.warning(f"Invalid Identity V RoleID format received: {roleid}")
+        return jsonify({"status": "error", "message": "Invalid Role ID format"}), 400
 
-    result = check_midasbuy_pubgm_api(uid, target_country)
+    result = check_identityv_api(server, roleid) # Pass server to the check function
 
-    # Determine appropriate HTTP status code for the response
     status_code = 200 # Default OK
     if result.get("status") == "error":
-        if "Invalid Player ID" in result.get("message", ""):
-            status_code = 400 # Bad Request for invalid ID
-        elif "Midasbuy API check blocked" in result.get("message", "") or "Blocked" in result.get("message", ""):
-             status_code = 403 # Forbidden if blocked
+        # Check for specific messages that indicate a user error (400)
+        if "Invalid Role ID" in result.get("message", "") or \
+           "Invalid server" in result.get("message", ""):
+            status_code = 400 # Bad Request
+        # Check for blocking/forbidden errors (403)
+        elif "Forbidden" in result.get("message", "") or "blocked" in result.get("message", ""):
+             status_code = 403
+        # Check for timeouts (504)
         elif "Timeout" in result.get("message", ""):
-             status_code = 504 # Gateway Timeout
-        elif "Error" in result.get("message", ""): # Catch other errors
-            status_code = 500 # Internal Server Error / Bad Gateway
+             status_code = 504
+        # Treat other errors as server-side issues (500)
+        else:
+            status_code = 500
 
     return jsonify(result), status_code
+
 
 # --- Server Start ---
 if __name__ == "__main__":
