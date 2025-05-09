@@ -122,17 +122,38 @@ def check_smile_one_api(game, uid, server_id): # server_id might be -1 or not us
             logging.info(f"Smile One JSON Response for {game}: {data}")
 
             if data.get("code") == 200:
-                username = data.get("username") or data.get("role_name") or data.get("nickname") or data.get("name")
-                if username:
-                    return {"status": "success", "username": username}
+                # --- MODIFIED USERNAME EXTRACTION LOGIC ---
+                username_to_return = None
+                # Common keys to check in order of likelihood
+                possible_username_keys = ["username", "nickname", "role_name", "name"]
+                
+                # If you discover a very specific key for Bloodstrike from logs, add it here:
+                # if game == "bloodstrike":
+                #     possible_username_keys.insert(0, "actual_bloodstrike_key_from_log") # Check game-specific first
+
+                for key in possible_username_keys:
+                    value_from_api = data.get(key)
+                    # Ensure the value is a non-empty string
+                    if value_from_api and isinstance(value_from_api, str) and value_from_api.strip():
+                        username_to_return = value_from_api.strip()
+                        logging.info(f"Found username for {game} under key '{key}': {username_to_return}")
+                        break # Stop searching once a valid username is found
+                
+                if username_to_return:
+                    return {"status": "success", "username": username_to_return}
+                # If no username found BUT it's a game that might just verify UID (like Genshin)
                 elif game in ["genshin-impact", "honkai-star-rail", "zenless-zone-zero"]:
-                    logging.info(f"Smile One check successful (Code: 200) for {game}, UID exists but no username. Returning 'Account Verified'. Data: {data}")
+                    logging.info(f"Smile One check successful (Code: 200) for {game}, UID exists but no username in common keys. Returning 'Account Verified'. Data: {data}")
                     return {"status": "success", "message": "Account Verified"}
-                # For Bloodstrike, if code is 200 and no username, it's an issue according to current logic
-                else:
-                    logging.warning(f"Smile One check successful (Code: 200) for {game} but username field not found. Data: {data}")
-                    return {"status": "error", "message": "Username not found in successful response"}
-            else:
+                # For Bloodstrike and other games where a username IS expected (like MLBB),
+                # if no username was extracted, return an error.
+                else: # This will include 'bloodstrike' and 'mobile-legends' if username_to_return is still None
+                    logging.warning(f"Smile One check successful (Code: 200) for {game} but NO username found in expected keys. UID: {uid}. Data: {data}")
+                    if game == "bloodstrike":
+                        return {"status": "error", "message": "Username could not be retrieved. Please verify ID."}
+                    else: # For MLBB or other games where username is strictly required
+                        return {"status": "error", "message": "Username not found in API response"}
+            else: # API code was not 200
                  logging.warning(f"Smile One check FAILED for {game} with API code {data.get('code')}: {data.get('message')}")
                  error_msg = data.get("message", f"Invalid UID/Server or API error code: {data.get('code')}")
                  return {"status": "error", "message": error_msg}
@@ -254,32 +275,24 @@ def check_smile_one(game, uid, server_id):
     # Basic input validation
     if not uid or not uid.isdigit():
         return jsonify({"status": "error", "message": "Invalid UID format"}), 400
-    # For MLBB, server_id is also required and numeric
     if game == 'mobile-legends' and (not server_id or not server_id.isdigit()):
          return jsonify({"status": "error", "message": "Invalid Server ID format for MLBB"}), 400
-    # For Bloodstrike, server_id is expected to be "-1" if no specific server field is used in UI.
-    # If Bloodstrike has actual server zones, frontend needs to send the correct one.
-    # For Genshin, HSR, ZZZ, server_id is a string like "os_asia".
 
     result = check_smile_one_api(game, uid, server_id)
-    status_code = 200 # Default to 200
+    status_code = 200 
 
     if result.get("status") == "error":
         msg = result.get("message", "")
-        # Handle specific errors that should result in non-200 HTTP status
         if "API Timeout" in msg: status_code = 504
         elif "Invalid response format" in msg: status_code = 502
         elif "API Connection Error" in msg: status_code = 502
         elif msg.startswith("Smile One API Unauthorized") or \
              msg.startswith("Smile One API Forbidden") or \
              msg.startswith("Smile One API Rate Limited"):
-            status_code = 403 # Or map specific codes like 429 if needed
+            status_code = 403 
         elif "An unexpected error occurred" in msg: status_code = 500
-        elif msg.startswith("Invalid game") and "for Smile One" in msg: status_code = 500 # Internal config issue
-        elif msg.startswith("PID not configured"): status_code = 500 # Internal config issue
-        # For other "error" statuses (like SmileOne's "Invalid UID" or our "Username not found..."),
-        # HTTP status remains 200. The JSON `result` carries the app-level error.
-
+        elif msg.startswith("Invalid game") and "for Smile One" in msg: status_code = 500 
+        elif msg.startswith("PID not configured"): status_code = 500 
     return jsonify(result), status_code
 
 @app.route('/check-netease/identityv/<server>/<roleid>', methods=['GET'])
@@ -302,12 +315,9 @@ def check_netease_identityv(server, roleid):
         elif "Netease API Rate Limited" in msg: status_code = 429
         elif "Netease Server Error" in msg : status_code = 502
         elif "An unexpected server error occurred" in msg: status_code = 500
-        # For Netease specific errors like "Invalid Role ID for this server", keep 200.
-
     return jsonify(result), status_code
 
 # --- Server Start ---
 if __name__ == "__main__":
-    # Set debug=True for local development to see more detailed error messages
-    # Set debug=False for production deployment
     app.run(host='0.0.0.0', port=port, debug=True)
+    
