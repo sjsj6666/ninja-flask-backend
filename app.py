@@ -51,9 +51,10 @@ def check_smile_one_api(game, uid, server_id): # server_id usage varies by game
         "mobile-legends": "https://www.smile.one/merchant/mobilelegends/checkrole",
         "genshin-impact": "https://www.smile.one/ru/merchant/genshinimpact/checkrole",
         "honkai-star-rail": "https://www.smile.one/br/merchant/honkai/checkrole",
-        "zenless-zone-zero": "https://www.smile.one/br/merchant/zzz/checkrole", # Placeholder
+        "zenless-zone-zero": "https://www.smile.one/br/merchant/zzz/checkrole",
         "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
-        "ragnarok-m-classic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole" # Added Ragnarok M Classic
+        "ragnarok-m-classic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole",
+        "love-and-deepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/" # <<< ADDED Love and Deepspace
     }
 
     if game not in endpoints:
@@ -70,30 +71,43 @@ def check_smile_one_api(game, uid, server_id): # server_id usage varies by game
     elif game == "honkai-star-rail":
         current_headers["Referer"] = "https://www.smile.one/br/merchant/honkai"
     elif game == "zenless-zone-zero":
-        current_headers["Referer"] = "https://www.smile.one/br/merchant/zzz" # Placeholder
+        current_headers["Referer"] = "https://www.smile.one/br/merchant/zzz"
     elif game == "bloodstrike":
         current_headers["Referer"] = "https://www.smile.one/br/merchant/game/bloodstrike"
-    elif game == "ragnarok-m-classic": # Added Ragnarok M Classic
+    elif game == "ragnarok-m-classic":
         current_headers["Referer"] = "https://www.smile.one/sg/merchant/ragnarokmclassic"
+    elif game == "love-and-deepspace": # <<< ADDED Referer
+        current_headers["Referer"] = "https://www.smile.one/us/merchant/loveanddeepspace"
 
 
-    # Set PID based on game
+    # Set PID based on game and server for Love and Deepspace
     bloodstrike_pid = os.environ.get("BLOODSTRIKE_SMILE_ONE_PID", "20294")
-    zzz_pid = os.environ.get("ZZZ_SMILE_ONE_PID", "YOUR_ZZZ_PID_NEEDS_TO_BE_SET")
-
-    params_pid_map = {
-        "mobile-legends": "25",
-        "genshin-impact": "19731",
-        "honkai-star-rail": "18356",
-        "zenless-zone-zero": zzz_pid,
-        "bloodstrike": bloodstrike_pid,
-        "ragnarok-m-classic": "23026" # Added PID for Ragnarok M Classic
+    zzz_pid = os.environ.get("ZZZ_SMILE_ONE_PID", "YOUR_ZZZ_PID_NEEDS_TO_BE_SET") # Keep this for ZZZ
+    
+    # Love and Deepspace PIDs depend on the server
+    love_deepspace_pids = {
+        "81": "19226", # Asia Server (sid 81)
+        "82": "19227", # America Server (sid 82)
+        "83": "19227"  # Europe Server (sid 83) - Note: America and Europe use the same pid 19227
     }
 
-    current_pid = params_pid_map.get(game)
+    current_pid = None
+    if game == "love-and-deepspace":
+        current_pid = love_deepspace_pids.get(server_id) # server_id will be "81", "82", or "83"
+    else:
+        params_pid_map = {
+            "mobile-legends": "25",
+            "genshin-impact": "19731",
+            "honkai-star-rail": "18356",
+            "zenless-zone-zero": zzz_pid, # This should still be set if zzz is requested
+            "bloodstrike": bloodstrike_pid,
+            "ragnarok-m-classic": "23026"
+        }
+        current_pid = params_pid_map.get(game)
 
-    if current_pid is None or current_pid == "YOUR_ZZZ_PID_NEEDS_TO_BE_SET":
-         return {"status": "error", "message": f"PID not configured for game '{game}'"}
+
+    if current_pid is None or current_pid == "YOUR_ZZZ_PID_NEEDS_TO_BE_SET": # Keep ZZZ check
+         return {"status": "error", "message": f"PID not configured or invalid server for game '{game}'"}
 
     params = {
         "pid": current_pid,
@@ -104,17 +118,17 @@ def check_smile_one_api(game, uid, server_id): # server_id usage varies by game
     if game == "mobile-legends":
         params["user_id"] = uid
         params["zone_id"] = server_id
-    elif game in ["honkai-star-rail", "genshin-impact", "zenless-zone-zero", "ragnarok-m-classic"]: # Added ragnarok-m-classic
+    elif game in ["honkai-star-rail", "genshin-impact", "zenless-zone-zero", "ragnarok-m-classic", "love-and-deepspace"]: # <<< ADDED love-and-deepspace
          params["uid"] = uid
-         params["sid"] = server_id # For Ragnarok M Classic, server_id from route maps to 'sid' payload. e.g. 50001
+         params["sid"] = server_id # For these games, frontend server_id (e.g., "os_asia", "50001", "81") maps to 'sid' payload.
     elif game == "bloodstrike":
         params["uid"] = uid
-        params["sid"] = server_id # Should be "-1" if no server selection for Bloodstrike
+        params["sid"] = server_id
 
-    logging.info(f"Sending Smile One request for {game}: URL={url}, Params={params}, Headers={current_headers.get('Cookie')[:50]}...") # Log part of cookie for brevity
+    logging.info(f"Sending Smile One request for {game}: URL={url}, Params={params}, Headers={current_headers.get('Cookie')[:50]}...")
     try:
         request_url = url
-        if game == "bloodstrike": # Bloodstrike uses product in query param
+        if game == "bloodstrike":
             request_url = f"{url}?product=bloodstrike"
 
         response = requests.post(request_url, data=params, headers=current_headers, timeout=10)
@@ -128,34 +142,56 @@ def check_smile_one_api(game, uid, server_id): # server_id usage varies by game
 
             if data.get("code") == 200:
                 username_to_return = None
-                possible_username_keys = ["username", "nickname", "role_name", "name", "char_name"] # Added char_name as a common one
-                
-                for key in possible_username_keys:
-                    value_from_api = data.get(key)
-                    if value_from_api and isinstance(value_from_api, str) and value_from_api.strip():
-                        username_to_return = value_from_api.strip()
-                        logging.info(f"Found username for {game} under key '{key}': {username_to_return}")
-                        break
+                # For Love and Deepspace, Smile.One returns the username directly in the 'username' field.
+                if game == "love-and-deepspace":
+                    username_from_api = data.get("username")
+                    if username_from_api and isinstance(username_from_api, str) and username_from_api.strip():
+                        username_to_return = username_from_api.strip()
+                        logging.info(f"Found username for {game} directly: {username_to_return}")
+                else: # Existing logic for other games
+                    possible_username_keys = ["username", "nickname", "role_name", "name", "char_name"]
+                    for key in possible_username_keys:
+                        value_from_api = data.get(key)
+                        if value_from_api and isinstance(value_from_api, str) and value_from_api.strip():
+                            username_to_return = value_from_api.strip()
+                            logging.info(f"Found username for {game} under key '{key}': {username_to_return}")
+                            break
                 
                 if username_to_return:
                     return {"status": "success", "username": username_to_return}
+                # Keep the "Account Verified" logic for Genshin/HSR/ZZZ if no username is found but code is 200
                 elif game in ["genshin-impact", "honkai-star-rail", "zenless-zone-zero"]:
                     logging.info(f"Smile One check successful (Code: 200) for {game}, UID exists but no username in common keys. Returning 'Account Verified'. Data: {data}")
                     return {"status": "success", "message": "Account Verified"}
-                else: # This will include 'bloodstrike', 'mobile-legends', 'ragnarok-m-classic' if username_to_return is still None
-                    logging.warning(f"Smile One check successful (Code: 200) for {game} but NO username found in expected keys. UID: {uid}. Data: {data}")
-                    # For games where a username IS expected, if no username was extracted, return an error.
-                    if game == "bloodstrike" or game == "ragnarok-m-classic": # Specify games that might just need UID verification if name isn't critical from API
-                         # If the API call was successful (code 200), it means the UID/SID combination is valid.
-                         # Even if we can't get a username, we can confirm validity.
+                else:
+                    logging.warning(f"Smile One check successful (Code: 200) for {game} but NO username found. UID: {uid}. Data: {data}")
+                    if game in ["bloodstrike", "ragnarok-m-classic"]: # Games that might just verify UID/SID
                         return {"status": "success", "message": "Account Verified (Username not retrieved)"}
-                    else: # For MLBB or other games where username is strictly required to be returned by API
+                    else: # MLBB, Love and Deepspace (if username was expected but not found due to API change)
                         return {"status": "error", "message": "Username not found in API response"}
             else:
                  logging.warning(f"Smile One check FAILED for {game} with API code {data.get('code')}: {data.get('message')}")
                  error_msg = data.get("message", f"Invalid UID/Server or API error code: {data.get('code')}")
                  return {"status": "error", "message": error_msg}
-        except ValueError:
+        except ValueError: # JSONDecodeError also inherits from ValueError
+            # Check if the raw_text looks like the HTML page from Smile.One for Love & Deepspace if it finds a name
+            # This is a bit hacky but necessary if Smile.One returns HTML for successful name checks for this game.
+            if game == "love-and-deepspace" and "<span class=\"name\">" in raw_text and "uid_error_tips" not in raw_text:
+                try:
+                    # Attempt to parse the username from HTML
+                    # Example: <span class="name">MooGoldMooGold</span>
+                    start_tag = "<span class=\"name\">"
+                    end_tag = "</span>"
+                    start_index = raw_text.find(start_tag)
+                    if start_index != -1:
+                        end_index = raw_text.find(end_tag, start_index + len(start_tag))
+                        if end_index != -1:
+                            username = raw_text[start_index + len(start_tag):end_index].strip()
+                            logging.info(f"Successfully parsed username '{username}' from HTML for Love and Deepspace.")
+                            return {"status": "success", "username": username}
+                except Exception as parse_ex:
+                    logging.error(f"Error parsing username from HTML for Love and Deepspace: {parse_ex} - Raw Text: {raw_text}")
+            
             logging.error(f"Error parsing JSON for Smile One {game}: - Raw Text: {raw_text}")
             return {"status": "error", "message": "Invalid response format from Smile One API"}
 
@@ -274,16 +310,10 @@ def check_smile_one(game, uid, server_id):
     if not uid or not uid.isdigit():
         return jsonify({"status": "error", "message": "Invalid UID format"}), 400
     
-    # Games requiring a numeric server_id
-    # Note: For Genshin/HSR/ZZZ, server_id is like 'os_asia', so not purely numeric.
-    # Bloodstrike uses '-1' when no server is applicable.
-    games_requiring_numeric_server_id = ['mobile-legends', 'ragnarok-m-classic']
+    games_requiring_numeric_server_id = ['mobile-legends', 'ragnarok-m-classic', 'love-and-deepspace'] # <<< ADDED love-and-deepspace
     if game.lower() in games_requiring_numeric_server_id and (not server_id or not server_id.isdigit()):
          return jsonify({"status": "error", "message": f"Invalid Server ID format for {game}. Expected numeric."}), 400
     
-    # For other games, server_id might be a string or a special value like '-1'.
-    # No further generic validation here; specific needs are handled by API or game logic.
-
     result = check_smile_one_api(game, uid, server_id)
     status_code = 200 
 
@@ -295,13 +325,12 @@ def check_smile_one(game, uid, server_id):
         elif "Smile One API Unauthorized" in msg or \
              "Smile One API Forbidden" in msg or \
              "Smile One API Rate Limited" in msg:
-            status_code = 403 # Or 401, 429 depending on specific error, but 403 is a safe default for client-side action
+            status_code = 403
         elif "An unexpected error occurred" in msg: status_code = 500
         elif msg.startswith("Invalid game") and "for Smile One" in msg: status_code = 500 
-        elif msg.startswith("PID not configured"): status_code = 500 
-        # For "Invalid UID/Server" type errors from the API, use 400 or 404
+        elif msg.startswith("PID not configured") or "invalid server for game" in msg : status_code = 500 # <<< UPDATED PID/SERVER CHECK
         elif "Invalid UID/Server" in msg or "not found in API response" in msg or "Invalid UID" in msg:
-            status_code = 404 # Or 400 if it's more about bad input syntax
+            status_code = 404
     return jsonify(result), status_code
 
 @app.route('/check-netease/identityv/<server>/<roleid>', methods=['GET'])
@@ -323,11 +352,10 @@ def check_netease_identityv(server, roleid):
         elif "API Timeout" in msg: status_code = 504
         elif "Netease API Rate Limited" in msg: status_code = 429
         elif "Netease Server Error" in msg : status_code = 502
-        elif "Invalid Role ID" in msg: status_code = 404 # Role ID not found for the server
+        elif "Invalid Role ID" in msg: status_code = 404 
         elif "An unexpected server error occurred" in msg: status_code = 500
     return jsonify(result), status_code
 
 # --- Server Start ---
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=True)
-    
