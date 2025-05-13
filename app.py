@@ -1,4 +1,3 @@
-# ----------- app.py -----------
 from flask import Flask, jsonify
 import requests
 from flask_cors import CORS
@@ -7,7 +6,7 @@ import logging
 import time
 import uuid
 
-app = Flask(__name__) # <<< THIS SHOULD BE NEAR THE TOP, AFTER IMPORTS
+app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Configure logging
@@ -22,6 +21,8 @@ SMILE_ONE_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "Origin": "https://www.smile.one",
     "X-Requested-With": "XMLHttpRequest",
+    # It's generally better to manage cookies per session if possible,
+    # but for a simple proxy, a long-lived cookie from ENV can work.
     "Cookie": os.environ.get("SMILE_ONE_COOKIE", "YOUR_DEFAULT_SMILE_ONE_COOKIE_IF_NEEDED_FOR_TESTING")
 }
 
@@ -46,16 +47,16 @@ IDV_SERVER_CODES = {
 
 # --- API Check Functions ---
 
-def check_smile_one_api(game, uid, server_id): # <<< FUNCTION DEFINITION STARTS HERE
-    # The line "if data.get("code") == 200:" should be indented INSIDE this function
+def check_smile_one_api(game, uid, server_id=None): # Added default for server_id
     endpoints = {
         "mobile-legends": "https://www.smile.one/merchant/mobilelegends/checkrole",
         "genshin-impact": "https://www.smile.one/ru/merchant/genshinimpact/checkrole",
         "honkai-star-rail": "https://www.smile.one/br/merchant/honkai/checkrole",
         "zenless-zone-zero": "https://www.smile.one/br/merchant/zzz/checkrole",
-        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
+        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", # Note: Generic 'game' endpoint
         "ragnarok-m-classic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole",
-        "love-and-deepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"
+        "love-and-deepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/",
+        "bigo-live": "https://www.smile.one/sg/merchant/bigo/checkrole" # <<< NEW Bigo Live endpoint
     }
 
     if game not in endpoints:
@@ -64,6 +65,7 @@ def check_smile_one_api(game, uid, server_id): # <<< FUNCTION DEFINITION STARTS 
     url = endpoints[game]
     current_headers = SMILE_ONE_HEADERS.copy()
 
+    # Specific referers (adjust if Bigo needs one)
     referer_map = {
         "mobile-legends": "https://www.smile.one/merchant/mobilelegends",
         "genshin-impact": "https://www.smile.one/ru/merchant/genshinimpact",
@@ -71,17 +73,22 @@ def check_smile_one_api(game, uid, server_id): # <<< FUNCTION DEFINITION STARTS 
         "zenless-zone-zero": "https://www.smile.one/br/merchant/zzz",
         "bloodstrike": "https://www.smile.one/br/merchant/game/bloodstrike",
         "ragnarok-m-classic": "https://www.smile.one/sg/merchant/ragnarokmclassic",
-        "love-and-deepspace": "https://www.smile.one/us/merchant/loveanddeepspace"
+        "love-and-deepspace": "https://www.smile.one/us/merchant/loveanddeepspace",
+        "bigo-live": "https://www.smile.one/sg/merchant/bigo" # <<< NEW Bigo Live Referer
     }
     current_headers["Referer"] = referer_map.get(game, "https://www.smile.one")
 
+
+    # --- PID Management (Add Bigo Live) ---
+    # These should ideally come from environment variables for flexibility
     bloodstrike_pid = os.environ.get("BLOODSTRIKE_SMILE_ONE_PID", "20294")
-    zzz_pid = os.environ.get("ZZZ_SMILE_ONE_PID", "YOUR_ZZZ_PID_NEEDS_TO_BE_SET")
-    
-    love_deepspace_pids = {
-        "81": "19226", 
-        "82": "19227", 
-        "83": "19227"
+    zzz_pid = os.environ.get("ZZZ_SMILE_ONE_PID", "YOUR_ZZZ_PID_NEEDS_TO_BE_SET") # Replace with actual if known
+    bigo_pid = os.environ.get("BIGO_SMILE_ONE_PID", "20580") # From your provided data
+
+    love_deepspace_pids = { # Server ID (sid) to Product ID (pid) mapping
+        "81": "19226", # Asia
+        "82": "19227", # America
+        "83": "19227"  # Europe (assuming same as America based on common patterns, verify if different)
     }
 
     current_pid = None
@@ -94,33 +101,41 @@ def check_smile_one_api(game, uid, server_id): # <<< FUNCTION DEFINITION STARTS 
             "honkai-star-rail": "18356",
             "zenless-zone-zero": zzz_pid,
             "bloodstrike": bloodstrike_pid,
-            "ragnarok-m-classic": "23026"
+            "ragnarok-m-classic": "23026",
+            "bigo-live": bigo_pid # <<< NEW Bigo Live PID mapping
         }
         current_pid = params_pid_map.get(game)
 
-    if current_pid is None or current_pid == "YOUR_ZZZ_PID_NEEDS_TO_BE_SET":
+    if current_pid is None or current_pid == "YOUR_ZZZ_PID_NEEDS_TO_BE_SET": # Check for unconfigured ZZZ PID
          return {"status": "error", "message": f"PID not configured or invalid server for game '{game}'"}
 
-    params = { "pid": current_pid, "checkrole": "1" }
+    # --- Parameter Construction (Add Bigo Live) ---
+    params = {
+        "pid": current_pid,
+        "checkrole": "1"
+    }
 
     if game == "mobile-legends":
         params["user_id"] = uid
         params["zone_id"] = server_id
     elif game in ["honkai-star-rail", "genshin-impact", "zenless-zone-zero", "ragnarok-m-classic", "love-and-deepspace"]:
          params["uid"] = uid
-         params["sid"] = server_id
+         params["sid"] = server_id # 'sid' is often used for server ID in these games
     elif game == "bloodstrike":
         params["uid"] = uid
-        params["sid"] = server_id
+        params["sid"] = server_id # Assuming bloodstrike also uses sid for server, if applicable
+    elif game == "bigo-live": # <<< NEW Bigo Live Params
+        params["uid"] = uid
+        params["product"] = "bigosg" # From your provided data
 
     logging.info(f"Sending Smile One request for {game}: URL={url}, Params={params}, Cookie(part)={current_headers.get('Cookie')[:50]}...")
     try:
         request_url = url
-        if game == "bloodstrike":
+        if game == "bloodstrike": # Bloodstrike specific URL adjustment
             request_url = f"{url}?product=bloodstrike"
 
         response = requests.post(request_url, data=params, headers=current_headers, timeout=10)
-        response.raise_for_status()
+        response.raise_for_status() # Will raise an HTTPError for bad responses (4xx or 5xx)
         raw_text = response.text
         logging.info(f"Smile One Raw Response for {game} (UID: {uid}, Server: {server_id}): {raw_text}")
 
@@ -128,19 +143,26 @@ def check_smile_one_api(game, uid, server_id): # <<< FUNCTION DEFINITION STARTS 
             data = response.json()
             logging.info(f"Smile One JSON Response for {game}: {data}")
 
-            if data.get("code") == 200: # <<< THIS IF IS CORRECTLY INDENTED WITHIN THE TRY-EXCEPT BLOCK, WHICH IS WITHIN THE FUNCTION
+            # --- Username Extraction Logic (Adapt for Bigo Live) ---
+            if data.get("code") == 200:
                 username_to_return = None
                 
-                primary_username_key = "nickname" if game == "love-and-deepspace" else "username"
-                
+                # For Bigo, the username is often in a 'message' or 'username' field, sometimes 'nickname'
+                # Let's prioritize specific keys if known, then fall back.
+                primary_username_key = "nickname"
+                if game == "mobile-legends": primary_username_key = "username"
+                elif game == "bigo-live": primary_username_key = "message" # Often 'message' contains the username for Bigo
+                elif game == "love-and-deepspace": primary_username_key = "nickname"
+
                 username_from_api = data.get(primary_username_key)
                 if username_from_api and isinstance(username_from_api, str) and username_from_api.strip():
                     username_to_return = username_from_api.strip()
                     logging.info(f"Found username for {game} using primary key '{primary_username_key}': {username_to_return}")
                 else:
-                    possible_username_keys = ["username", "nickname", "role_name", "name", "char_name"]
+                    # Fallback keys
+                    possible_username_keys = ["username", "nickname", "role_name", "name", "char_name", "message"]
                     for key in possible_username_keys:
-                        if key == primary_username_key: continue
+                        if key == primary_username_key: continue # Already checked
                         value_from_api = data.get(key)
                         if value_from_api and isinstance(value_from_api, str) and value_from_api.strip():
                             username_to_return = value_from_api.strip()
@@ -149,19 +171,21 @@ def check_smile_one_api(game, uid, server_id): # <<< FUNCTION DEFINITION STARTS 
                 
                 if username_to_return:
                     return {"status": "success", "username": username_to_return}
+                # Games that might return success without explicit username but are valid
                 elif game in ["genshin-impact", "honkai-star-rail", "zenless-zone-zero"]:
                     return {"status": "success", "message": "Account Verified"}
-                elif game in ["bloodstrike", "ragnarok-m-classic"]:
+                elif game in ["bloodstrike", "ragnarok-m-classic"]: # Games verified but username might not be sent back
                     return {"status": "success", "message": "Account Verified (Username not retrieved)"}
-                else: 
-                    logging.warning(f"Smile One check successful (Code: 200) for {game} but NO username found in any expected keys. UID: {uid}. Data: {data}")
-                    return {"status": "error", "message": "Username not found in API response"}
-            else:
+                else: # Success code 200, but no recognizable username field
+                    logging.warning(f"Smile One check successful (Code: 200) for {game} but NO username found. UID: {uid}. Data: {data}")
+                    return {"status": "error", "message": "Username not found in API response"} # Or "Account Verified (No Username)"
+            else: # API returned a non-200 'code' within its JSON response
                  error_msg = data.get("message", f"Invalid UID/Server or API error code: {data.get('code')}")
                  logging.warning(f"Smile One check FAILED for {game} with API code {data.get('code')}: {error_msg}")
                  return {"status": "error", "message": error_msg}
         
-        except ValueError: 
+        except ValueError: # JSONDecodeError
+            # Handle cases where response is not JSON but might contain username (like Love & Deepspace HTML)
             if game == "love-and-deepspace" and "<span class=\"name\">" in raw_text and "uid_error_tips" not in raw_text:
                 try:
                     start_tag = "<span class=\"name\">"
@@ -182,7 +206,7 @@ def check_smile_one_api(game, uid, server_id): # <<< FUNCTION DEFINITION STARTS 
     except requests.Timeout:
         logging.error(f"Error: Smile One API timed out for {game}")
         return {"status": "error", "message": "API Timeout"}
-    except requests.RequestException as e:
+    except requests.RequestException as e: # Catches HTTPError, ConnectionError, etc.
         status_code_str = str(e.response.status_code) if e.response is not None else "N/A"
         error_text = e.response.text if e.response is not None else "No response body"
         logging.error(f"Error checking Smile One {game} (UID {uid}): HTTP Status={status_code_str}, Error={str(e)}, Response: {error_text}")
@@ -197,13 +221,12 @@ def check_smile_one_api(game, uid, server_id): # <<< FUNCTION DEFINITION STARTS 
             elif status_code_val == 429: user_msg = "Smile One API Rate Limited (429)"
             elif status_code_val >= 500: user_msg = f"Smile One API Server Error ({status_code_val})"
         return {"status": "error", "message": user_msg}
-    except Exception as e:
+    except Exception as e: # Catch-all for other unexpected errors
         logging.exception(f"Unexpected error in check_smile_one_api for {game}, UID {uid}")
         return {"status": "error", "message": "An unexpected error occurred"}
 
 
 def check_identityv_api(server, roleid):
-    # ... (keep this function as is) ...
     server_code = IDV_SERVER_CODES.get(server.lower())
     if not server_code:
         logging.error(f"Invalid server provided for Identity V check: {server}")
@@ -212,7 +235,7 @@ def check_identityv_api(server, roleid):
     url = NETEASE_IDV_BASE_URL_TEMPLATE.format(server_code=server_code)
     current_timestamp = int(time.time() * 1000)
     trace_id = str(uuid.uuid4())
-    device_id = os.environ.get("NETEASE_DEVICE_ID", "156032181698579111") 
+    device_id = os.environ.get("NETEASE_DEVICE_ID", "156032181698579111") # Example, use your actual device ID if needed
 
     query_params = {
         "roleid": roleid,
@@ -222,7 +245,7 @@ def check_identityv_api(server, roleid):
         **NETEASE_IDV_STATIC_PARAMS
     }
     headers = NETEASE_IDV_HEADERS.copy()
-    headers["X-TASK-ID"] = f"transid={trace_id},uni_transaction_id=default"
+    headers["X-TASK-ID"] = f"transid={trace_id},uni_transaction_id=default" # Example, might need adjustment
 
     logging.info(f"Sending Netease IDV request: URL={url}, Params={query_params}")
     try:
@@ -234,17 +257,18 @@ def check_identityv_api(server, roleid):
             data = response.json()
             logging.info(f"Netease IDV JSON Response: {data}")
             api_code = data.get("code")
-            api_message = data.get("message", data.get("msg", "")) or ""
+            api_message = data.get("message", data.get("msg", "")) or "" # Prioritize 'message' then 'msg'
 
-            if api_code == "0000":
+            if api_code == "0000": # Success code from Netease
                 username = None
                 if isinstance(data.get("data"), dict):
-                    username = data["data"].get("rolename")
+                    username = data["data"].get("rolename") # Common key for username
                 if username:
                     logging.info(f"Netease IDV check SUCCESS (Server: {server}, RoleID: {roleid}). Username: {username}")
                     return {"status": "success", "username": username}
                 else:
                     logging.warning(f"Netease IDV check successful (Code: {api_code}) but username 'rolename' not found. RoleID: {roleid}. Data: {data}")
+                    # Check if the message indicates success despite missing username
                     if "ok" in api_message.lower() or "success" in api_message.lower():
                          return {"status": "success", "message": "Role ID Verified (Name missing)"}
                     else:
@@ -252,16 +276,17 @@ def check_identityv_api(server, roleid):
             elif "role not exist" in api_message.lower() or "role_not_exist" in api_message.lower() or api_code == "40004":
                 logging.warning(f"Netease IDV check FAILED: Role not found. (Server: {server}, RoleID: {roleid}), Code: {api_code}, Msg: {api_message}")
                 return {"status": "error", "message": "Invalid Role ID for this server"}
-            else:
+            else: # Other error codes
                 logging.warning(f"Netease IDV check FAILED with API code {api_code}: {api_message}. (Server: {server}, RoleID: {roleid})")
                 error_detail = f" ({api_message})" if api_message else ""
                 return {"status": "error", "message": f"Invalid Role ID or API Error{error_detail}"}
-        except ValueError: 
+        except ValueError: # JSONDecodeError if response is not JSON
             logging.error(f"Error parsing JSON for Netease IDV: (Server: {server}, RoleID: {roleid}). Status: {response.status_code}. Raw Text: {raw_text}")
+            # Provide more specific error messages based on HTTP status or content
             if response.status_code >= 500: return {"status": "error", "message": "Netease Server Error"}
             elif response.status_code == 403: return {"status": "error", "message": "Netease API Forbidden (403)"}
             elif response.status_code == 429: return {"status": "error", "message": "Netease API Rate Limited (429)"}
-            elif "<html" in raw_text.lower(): return {"status": "error", "message": "Netease API check blocked or unavailable"}
+            elif "<html" in raw_text.lower(): return {"status": "error", "message": "Netease API check blocked or unavailable"} # If HTML page is returned
             else: return {"status": "error", "message": f"Invalid API response (Status: {response.status_code})"}
     except requests.Timeout:
         logging.error(f"Error: Netease IDV timed out for (Server: {server}, RoleID {roleid})")
@@ -274,12 +299,12 @@ def check_identityv_api(server, roleid):
         if e.response is not None:
             status_code_val = e.response.status_code
             if status_code_val == 403: user_msg = "Netease API Forbidden (403)"
-            elif status_code_val == 401: user_msg = "Netease API Auth Error (401)"
+            elif status_code_val == 401: user_msg = "Netease API Auth Error (401)" # Could be token or session issue
             elif status_code_val == 404: user_msg = "Netease API Endpoint Not Found (404)"
             elif status_code_val == 429: user_msg = "Netease API Rate Limited (429)"
             elif status_code_val >= 500: user_msg = f"Netease Server Error ({status_code_val})"
         return {"status": "error", "message": user_msg}
-    except Exception as e:
+    except Exception as e: # Catch-all for other unexpected errors
         logging.exception(f"Unexpected error in check_identityv_api for (Server: {server}, RoleID {roleid})")
         return {"status": "error", "message": "An unexpected server error occurred"}
 
@@ -289,41 +314,54 @@ def check_identityv_api(server, roleid):
 def home():
     return "Hello! This is the Ninja Flask Backend."
 
+@app.route('/check-smile/<game>/<uid>/', defaults={'server_id': None}, methods=['GET']) # Added default for server_id
 @app.route('/check-smile/<game>/<uid>/<server_id>', methods=['GET'])
 def check_smile_one(game, uid, server_id):
+    # Basic UID validation
     if not uid or not uid.isdigit():
         return jsonify({"status": "error", "message": "Invalid UID format"}), 400
     
+    # Server ID validation for games that require it to be numeric
     games_requiring_numeric_server_id = ['mobile-legends', 'ragnarok-m-classic', 'love-and-deepspace']
     if game.lower() in games_requiring_numeric_server_id and (not server_id or not server_id.isdigit()):
          return jsonify({"status": "error", "message": f"Invalid Server ID format for {game}. Expected numeric."}), 400
     
-    result = check_smile_one_api(game, uid, server_id)
-    status_code = 200 
+    # For Bigo Live, server_id is not used in the API call to Smile.One's /checkrole but might be part of your URL structure.
+    # The check_smile_one_api function itself will handle not using server_id if 'game' is 'bigo-live'.
+    if game.lower() == 'bigo-live' and server_id is not None:
+        logging.info(f"Note: Server ID '{server_id}' provided for Bigo Live, but it's not typically used in the Smile.One checkrole API for Bigo.")
+        # You can choose to ignore server_id for Bigo here or pass it along if your API function handles it.
+        # For now, we pass it, and check_smile_one_api will ignore it if 'game' is 'bigo-live'.
 
+    result = check_smile_one_api(game, uid, server_id)
+    status_code = 200 # Default to 200 OK
+
+    # Refine status codes based on result message
     if result.get("status") == "error":
         msg = result.get("message", "")
-        if "API Timeout" in msg: status_code = 504
-        elif "Invalid response format" in msg: status_code = 502
-        elif "API Connection Error" in msg: status_code = 502
+        if "API Timeout" in msg: status_code = 504 # Gateway Timeout
+        elif "Invalid response format" in msg: status_code = 502 # Bad Gateway
+        elif "API Connection Error" in msg: status_code = 502 # Bad Gateway
         elif "Smile One API Unauthorized" in msg or \
              "Smile One API Forbidden" in msg or \
              "Smile One API Rate Limited" in msg:
-            status_code = 403
-        elif "An unexpected error occurred" in msg: status_code = 500
-        elif msg.startswith("Invalid game") and "for Smile One" in msg: status_code = 500 
-        elif msg.startswith("PID not configured") or "invalid server for game" in msg : status_code = 500
+            status_code = 403 # Forbidden (could also be 401 or 429 depending on specific error)
+        elif "An unexpected error occurred" in msg: status_code = 500 # Internal Server Error
+        elif msg.startswith("Invalid game") and "for Smile One" in msg: status_code = 500 # Config error on backend
+        elif msg.startswith("PID not configured") or "invalid server for game" in msg : status_code = 500 # Config error
         elif "Invalid UID/Server" in msg or "not found in API response" in msg or "Invalid UID" in msg:
-            status_code = 404
+            status_code = 404 # Not Found (user not found or bad input)
+            # More specific for username not found could be 200 with error message,
+            # but 404 is also reasonable if the primary purpose is validation.
     return jsonify(result), status_code
 
 @app.route('/check-netease/identityv/<server>/<roleid>', methods=['GET'])
 def check_netease_identityv(server, roleid):
     logging.info(f"Received Netease IDV check request for Server: {server}, RoleID: {roleid}")
-    if server.lower() not in IDV_SERVER_CODES:
+    if server.lower() not in IDV_SERVER_CODES: # Ensure server is one of the expected values
          logging.warning(f"Invalid Identity V server received: {server}")
          return jsonify({"status": "error", "message": "Invalid server specified"}), 400
-    if not roleid or not roleid.isdigit():
+    if not roleid or not roleid.isdigit(): # Ensure roleid is numeric
         logging.warning(f"Invalid Identity V RoleID format received: {roleid}")
         return jsonify({"status": "error", "message": "Invalid Role ID format"}), 400
 
@@ -335,11 +373,11 @@ def check_netease_identityv(server, roleid):
         elif "Netease API Forbidden" in msg or "blocked" in msg: status_code = 403
         elif "API Timeout" in msg: status_code = 504
         elif "Netease API Rate Limited" in msg: status_code = 429
-        elif "Netease Server Error" in msg : status_code = 502
-        elif "Invalid Role ID" in msg: status_code = 404 
-        elif "An unexpected server error occurred" in msg: status_code = 500
+        elif "Netease Server Error" in msg : status_code = 502 # Bad Gateway (if Netease itself is down)
+        elif "Invalid Role ID" in msg: status_code = 404 # Role ID not found
+        elif "An unexpected server error occurred" in msg: status_code = 500 # Your backend issue
     return jsonify(result), status_code
 
 # --- Server Start ---
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True) # debug=True is fine for dev, set to False for prod
