@@ -52,12 +52,11 @@ RAZER_GOLD_HEADERS = {
     "Sec-Fetch-Site": "same-origin",
 }
 
-# Mapping your internal server IDs (used in dropdown) to Razer Gold's serverId query param values
 RAZER_ZZZ_SERVER_ID_MAP = {
-    "prod_official_asia": "prod_gf_jp",  # Asia -> Japan (as per your previous screenshot)
-    "prod_official_usa": "prod_gf_us",   # America -> US
-    "prod_official_eur": "prod_gf_eu",   # Europe -> EU
-    "prod_official_cht": "prod_gf_sg"    # TW, HK, MO -> Singapore (as per your new instruction)
+    "prod_official_asia": "prod_gf_jp",
+    "prod_official_usa": "prod_gf_us",
+    "prod_official_eur": "prod_gf_eu",
+    "prod_official_cht": "prod_gf_sg"
 }
 
 # --- API Check Functions ---
@@ -118,7 +117,7 @@ def check_smile_one_api(game, uid, server_id=None):
          params["sid"] = server_id
     elif game == "bloodstrike":
         params["uid"] = uid
-        params["sid"] = server_id # Assuming SmileOne uses 'sid' for Bloodstrike server
+        params["sid"] = server_id
     elif game == "bigo-live":
         params["uid"] = uid
         params["product"] = "bigosg"
@@ -163,9 +162,9 @@ def check_smile_one_api(game, uid, server_id=None):
             else:
                  error_msg = data.get("message", f"Invalid UID/Server or API error code: {data.get('code')}")
                  return {"status": "error", "message": error_msg}
-        except ValueError: # JSONDecodeError
+        except ValueError:
             if game == "love-and-deepspace" and "<span class=\"name\">" in raw_text and "uid_error_tips" not in raw_text:
-                try: # ... (parsing logic for L&D HTML) ...
+                try:
                     start_tag = "<span class=\"name\">"; end_tag = "</span>"
                     start_index = raw_text.find(start_tag)
                     if start_index != -1:
@@ -180,7 +179,6 @@ def check_smile_one_api(game, uid, server_id=None):
         logging.error(f"Error: Smile One API timed out for {game}")
         return {"status": "error", "message": "API Timeout"}
     except requests.RequestException as e:
-        # ... (detailed error handling for Smile One RequestException) ...
         status_code_str = str(e.response.status_code) if e.response is not None else "N/A"
         logging.error(f"Smile One RequestException for {game}: Status {status_code_str}, Error: {e}")
         return {"status": "error", "message": f"Smile One API Connection Error ({status_code_str})"}
@@ -214,14 +212,13 @@ def check_identityv_api(server, roleid):
             else:
                 error_detail = f" ({api_message})" if api_message else ""
                 return {"status": "error", "message": f"Invalid Role ID or API Error{error_detail}"}
-        except ValueError: # JSONDecodeError
+        except ValueError:
             logging.error(f"Error parsing JSON for Netease IDV. Status: {response.status_code}. Raw: {raw_text}")
             if response.status_code >= 500: return {"status": "error", "message": "Netease Server Error"}
-            # ... (other Netease JSON error handling) ...
             elif "<html" in raw_text.lower(): return {"status": "error", "message": "Netease API check blocked"}
             else: return {"status": "error", "message": f"Invalid API response (Status: {response.status_code})"}
     except requests.Timeout: return {"status": "error", "message": "API Timeout"}
-    except requests.RequestException as e: # ... (detailed error handling for Netease RequestException) ...
+    except requests.RequestException as e:
         status_code_str = str(e.response.status_code) if e.response is not None else "N/A"
         logging.error(f"Netease IDV RequestException: Status {status_code_str}, Error: {e}")
         return {"status": "error", "message": f"Netease API Connection Error ({status_code_str})"}
@@ -246,27 +243,54 @@ def check_razer_zzz_api(user_id, server_id_internal):
         try:
             data = response.json()
             logging.info(f"Razer Gold ZZZ JSON Response: {data}")
-            if response.status_code == 200 and data.get("code") == 0 and isinstance(data.get("data"), dict):
-                nickname = data["data"].get("name")
-                if nickname: return {"status": "success", "username": nickname}
-                else: return {"status": "success", "message": "Account Verified (Nickname not retrieved)"}
-            else:
-                error_message_from_api = data.get("message", "Unknown error from Razer Gold API.")
-                if response.status_code == 404 and "not found" in error_message_from_api.lower():
-                     error_message_from_api = "Invalid User ID or Server for ZZZ."
+
+            if response.status_code == 200:
+                razer_api_code = data.get("code") # This is Razer's own API code, separate from HTTP status
+                razer_api_message = data.get("message")
+
+                if razer_api_code == 77003 and razer_api_message == "Invalid game user credentials":
+                    logging.warning(f"Razer Gold ZZZ check FAILED. API Code: {razer_api_code}, Msg: {razer_api_message}")
+                    return {"status": "error", "message": "Invalid User ID or Server for ZZZ."}
+
+                # Successful response from Razer for ZZZ often has the username directly
+                nickname = data.get("username") # As per your successful log: {"username":"x********z", ...}
+                if nickname and isinstance(nickname, str):
+                    logging.info(f"Razer Gold ZZZ check SUCCESS. Nickname: {nickname}")
+                    return {"status": "success", "username": nickname}
+                
+                # Fallback structure if Razer's API changes to use data.name and code: 0
+                elif razer_api_code == 0 and isinstance(data.get("data"), dict):
+                    nickname_in_data = data["data"].get("name")
+                    if nickname_in_data:
+                        logging.info(f"Razer Gold ZZZ check SUCCESS (fallback structure data.name). Nickname: {nickname_in_data}")
+                        return {"status": "success", "username": nickname_in_data}
+                
+                # If HTTP 200 but no clear success/error indicators or username
+                logging.warning(f"Razer Gold ZZZ HTTP 200, but unclear API response. UID: {user_id}. Data: {data}")
+                # You might want to return an error here or a generic success if code implies it
+                if razer_api_code == 0 : # If Razer's code is 0, assume valid even if name isn't parsed
+                    return {"status": "success", "message": "Account Verified (Nickname may be unavailable from Razer)"}
+                else:
+                    return {"status": "error", "message": razer_api_message or "Unknown success response from Razer Gold."}
+            else: # HTTP error from Razer (e.g., 404, 500)
+                error_message_from_api = data.get("message", f"Razer Gold API HTTP Error: {response.status_code}")
+                logging.warning(f"Razer Gold ZZZ check FAILED. HTTP: {response.status_code}, API Msg: {error_message_from_api}")
                 return {"status": "error", "message": error_message_from_api}
+
         except ValueError:
             logging.error(f"Error parsing JSON for Razer Gold ZZZ. Status: {response.status_code}. Raw: {raw_text}")
             if "<html" in raw_text.lower(): return {"status": "error", "message": "Razer Gold API check blocked"}
             return {"status": "error", "message": f"Invalid API response from Razer Gold (Status: {response.status_code})."}
+
     except requests.Timeout:
+        logging.error("Error: Razer Gold ZZZ API timed out.")
         return {"status": "error", "message": "Razer Gold API Timeout"}
     except requests.RequestException as e:
         status_code_str = str(e.response.status_code) if e.response is not None else "N/A"
-        logging.error(f"Razer Gold ZZZ RequestException: Status {status_code_str}, Error: {e}")
+        logging.error(f"Razer Gold ZZZ RequestException: Status {status_code_str}, Error: {str(e)}")
         return {"status": "error", "message": f"Razer Gold API Connection Error ({status_code_str})"}
     except Exception as e:
-        logging.exception(f"Unexpected error in check_razer_zzz_api")
+        logging.exception(f"Unexpected error in check_razer_zzz_api for UID {user_id}")
         return {"status": "error", "message": "An unexpected error occurred with ZZZ validation."}
 
 # --- Flask Routes ---
@@ -285,21 +309,21 @@ def check_smile_one(game, uid, server_id):
 
     if game_lower == "zenless-zone-zero":
         logging.info(f"Routing ZZZ check to Razer Gold API for UID: {uid}, Server: {server_id}")
-        if not server_id:
+        if not server_id: # Razer check requires server_id for mapping
             return jsonify({"status": "error", "message": "Server ID is required for Zenless Zone Zero."}), 400
         result = check_razer_zzz_api(uid, server_id)
     else:
         result = check_smile_one_api(game, uid, server_id)
 
     status_code = 200
-    if result.get("status") == "error": # Generic error status code setting
+    if result.get("status") == "error":
         msg = result.get("message", "").lower()
         if "timeout" in msg: status_code = 504
         elif "invalid response format" in msg or "invalid api response" in msg: status_code = 502
         elif "connection error" in msg: status_code = 502
         elif "unauthorized" in msg or "forbidden" in msg or "rate limited" in msg or "blocked" in msg: status_code = 403
         elif "unexpected error" in msg or "pid not configured" in msg or "invalid server configuration" in msg: status_code = 500
-        elif "invalid uid" in msg or "not found" in msg or "invalid user id" in msg: status_code = 404
+        elif "invalid uid" in msg or "not found" in msg or "invalid user id" in msg or "invalid game user credentials" in msg : status_code = 404 # Razer 77003 maps here
     return jsonify(result), status_code
 
 @app.route('/check-netease/identityv/<server>/<roleid>', methods=['GET'])
@@ -309,12 +333,12 @@ def check_netease_identityv(server, roleid):
     if not roleid or not roleid.isdigit():
         return jsonify({"status": "error", "message": "Invalid Role ID format"}), 400
     result = check_identityv_api(server, roleid)
-    status_code = 200 # ... (similar logic as above to set status_code from result)
+    status_code = 200
     if result.get("status") == "error":
         msg = result.get("message", "").lower()
         if "timeout" in msg: status_code = 504
-        # ... add other Netease specific error code mappings if needed ...
         elif "invalid role id" in msg : status_code = 404
+        # Add more specific mappings if needed
     return jsonify(result), status_code
 
 if __name__ == "__main__":
