@@ -2,8 +2,9 @@ import os
 import requests
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from dotenv import load_dotenv
+from dotenv import load_dotenv # This line requires python-dotenv to be installed
 import logging
+import hashlib # For Smile.One key generation if you implement it fully
 
 load_dotenv()
 
@@ -14,138 +15,118 @@ CORS(app) # Enable CORS for all routes
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Constants for Smile.One (Example, you might have more) ---
+# --- Constants for Smile.One ---
 SMILE_ONE_API_URL = "https://globalapi.smile.one/smilecoin/api/product/checkrole"
-SMILE_ONE_USER_ID = os.getenv("SMILE_ONE_USER_ID")
-SMILE_ONE_KEY = os.getenv("SMILE_ONE_KEY")
-SMILE_ONE_MERCHANT_ID = "198765" # Replace with your actual merchant ID if different
+# These would ideally come from environment variables for security
+SMILE_ONE_USER_ID = os.getenv("SMILE_ONE_USER_ID", "YOUR_SMILE_ONE_USER_ID") # Example default
+SMILE_ONE_SECRET_KEY = os.getenv("SMILE_ONE_SECRET_KEY", "YOUR_SMILE_ONE_SECRET_KEY") # Example default
+SMILE_ONE_MERCHANT_ID = os.getenv("SMILE_ONE_MERCHANT_ID", "198765") # Example default
 
-# Game-specific configurations or mappings for Smile.One (if needed)
+# Game-specific product IDs for Smile.One
 SMILE_ONE_PRODUCT_IDS = {
     "mobile-legends": "1001",
-    "honkai-star-rail": "2056", # Example, replace with actual if using Smile.One for HSR
-    # "genshin-impact": "2002", # Old Smile.One ID, now Genshin will use Razer
-    "zenless-zone-zero": "RAZER_ZZZ", # Special marker, handled differently
-    "bloodstrike": "2103", # Example ID for Smile.One
-    "ragnarok-m-classic": "3010", # Example ID for Smile.One
-    "love-and-deepspace": "2088", # Example ID for Smile.One
-    "bigo-live": "4001", # Example ID for Smile.One
-    "marvel-rivals": "RAZER_MARVEL_RIVALS" # Placeholder if it also uses Razer via a similar pattern
-    # Add other games that use Smile.One with their product IDs
+    "honkai-star-rail": "2056",
+    "bloodstrike": "2103",
+    "ragnarok-m-classic": "3010",
+    "love-and-deepspace": "2088",
+    "bigo-live": "4001",
+    # "genshin-impact": "2002", # Genshin now uses Razer
+    # "zenless-zone-zero": "RAZER_ZZZ", # ZZZ now uses Razer
+    # "marvel-rivals": "RAZER_MARVEL_RIVALS" # Marvel Rivals if it uses Razer
 }
 
 # --- Netease Identity V Specific ---
-NETEASE_IDV_API_URL = "https://pay.neteasegames.com/g37/api/check_user" # Replace with actual if different
+NETEASE_IDV_API_URL = os.getenv("NETEASE_IDV_API_URL", "https://pay.neteasegames.com/g37/api/check_user")
 
 @app.route('/')
 def home():
     return "Ninja Flask Backend is running!"
 
-# Generic proxy for Smile.One or other services
+def generate_smile_one_signature(params, secret_key):
+    """
+    Generates a signature for Smile.One API calls.
+    This is a simplified example. Refer to Smile.One documentation for exact requirements.
+    Typically involves sorting parameters, concatenating them with the secret key, and hashing.
+    """
+    sorted_params = sorted(params.items())
+    query_string_parts = [f"{k}={v}" for k, v in sorted_params if v is not None and k != "key"]
+    raw_string = "&".join(query_string_parts) + secret_key
+    signature = hashlib.md5(raw_string.encode('utf-8')).hexdigest()
+    return signature
+
 @app.route('/check-smile/<game>/<uid>/<server_id>', methods=['GET'])
-@app.route('/check-smile/<game>/<uid>', methods=['GET'])  # For games without server_id
-def check_smile_one_proxy(game, uid, server_id=None):
+@app.route('/check-smile/<game>/<uid>', methods=['GET'])
+def check_game_user_proxy(game, uid, server_id=None):
     logger.info(f"Received check request for game: {game}, UID: {uid}, Server ID: {server_id}")
 
-    # --- Razer Gold API for Genshin Impact ---
+    razer_base_url = "https://gold.razer.com/api/ext"
+    razer_headers = {
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        # 'Referer': 'https://gold.razer.com/' # Sometimes helpful
+    }
+
+    # --- Razer Gold API Games ---
     if game == 'genshin-impact':
         if not server_id:
             logger.warning("Genshin Impact check: Server ID missing.")
             return jsonify({"status": "error", "message": "Server ID is required for Genshin Impact."}), 400
-        
-        razer_url = f"https://gold.razer.com/api/ext/genshinimpact/users/{uid}?serverId={server_id}"
-        logger.info(f"Calling Razer API for Genshin Impact: {razer_url}")
-        headers = {
-            'Accept': 'application/json, text/plain, */*',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            # Add other headers if Razer requires them, like 'Referer' or specific cookies, though often not needed for direct API calls if public.
-            # The cookie string from your log is very long and likely session-specific for browser use.
-            # For a backend-to-backend call, often fewer headers are needed. Start simple.
-        }
-        try:
-            response = requests.get(razer_url, headers=headers, timeout=8) # 8 second timeout
-            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
-            
-            data = response.json()
-            logger.info(f"Razer API response for Genshin Impact: {data}")
-
-            # Razer's success response example: {"status":"success","username":"x********z"}
-            # Razer's "user not found" example: {"message":"User not found.","status":"fail"}
-            if data.get("status") == "success" and data.get("username"):
-                return jsonify({"status": "success", "username": data["username"]})
-            elif data.get("status") == "fail" and data.get("message"):
-                 return jsonify({"status": "error", "message": data["message"]})
-            else:
-                logger.warning(f"Unexpected JSON response structure from Razer (Genshin): {data}")
-                return jsonify({"status": "error", "message": "Unexpected response from Razer."})
-
-        except requests.exceptions.HTTPError as errh:
-            error_message = f"Razer API HTTP Error: {str(errh)}"
-            try: # Try to get more specific message from Razer's error response
-                error_data = errh.response.json()
-                error_message = error_data.get("message", str(errh.response.text[:200]))
-            except ValueError: # If Razer's error response is not JSON
-                error_message = str(errh.response.text[:200]) if errh.response.text else str(errh)
-            logger.error(f"HTTPError calling Razer for Genshin: {error_message} (Status: {errh.response.status_code})")
-            return jsonify({"status": "error", "message": error_message}), errh.response.status_code
-        except requests.exceptions.Timeout:
-            logger.error("Timeout calling Razer API for Genshin.")
-            return jsonify({"status": "error", "message": "Request to Razer API timed out."}), 504
-        except requests.exceptions.RequestException as e:
-            logger.error(f"RequestException calling Razer for Genshin: {str(e)}")
-            return jsonify({"status": "error", "message": f"Razer API Request Error: {str(e)}"}), 500
-        except ValueError: # JSONDecodeError
-            logger.error("ValueError (JSONDecodeError) parsing Razer response for Genshin.")
-            return jsonify({"status": "error", "message": "Invalid JSON response from Razer."}), 500
-
-    # --- Razer Gold API for Zenless Zone Zero (Example from previous work) ---
+        razer_url = f"{razer_base_url}/genshinimpact/users/{uid}?serverId={server_id}"
+        service_name = "Razer (Genshin Impact)"
     elif game == 'zenless-zone-zero':
         if not server_id:
             logger.warning("Zenless Zone Zero check: Server ID missing.")
             return jsonify({"status": "error", "message": "Server ID is required for Zenless Zone Zero."}), 400
+        # Assuming ZZZ Razer API path is similar to Genshin. Adjust if different.
+        razer_url = f"{razer_base_url}/zenlesszonezero/users/{uid}?serverId={server_id}"
+        service_name = "Razer (Zenless Zone Zero)"
+    elif game == 'marvel-rivals': # Example if Marvel Rivals uses a similar Razer API
+        if not server_id: # Marvel Rivals might not need a server_id for Razer check. Adjust as needed.
+             logger.warning("Marvel Rivals (Razer) check: Server ID missing, but might not be required by this specific Razer endpoint.")
+             # If server_id is truly optional for this game on Razer:
+             # razer_url = f"{razer_base_url}/marvelrivals/users/{uid}" # Example without serverId
+             # If it IS required:
+             # return jsonify({"status": "error", "message": "Server ID is required for Marvel Rivals (Razer)."}), 400
+        # For now, assuming it requires serverId for consistency, adjust if API differs:
+        razer_url = f"{razer_base_url}/marvelrivals/users/{uid}?serverId={server_id}"
+        service_name = "Razer (Marvel Rivals)"
+    else:
+        razer_url = None # Not a Razer game handled here
 
-        # Note: ZZZ Razer API endpoint might be different from Genshin's. Adjust if necessary.
-        # Assuming it's similar for now:
-        razer_zzz_url = f"https://gold.razer.com/api/ext/zenlesszonezero/users/{uid}?serverId={server_id}" 
-        # ^^^ Ensure 'zenlesszonezero' is the correct path segment if it's different from 'genshinimpact'
-        logger.info(f"Calling Razer API for Zenless Zone Zero: {razer_zzz_url}")
-        headers = {
-            'Accept': 'application/json, text/plain, */*',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+    if razer_url:
+        logger.info(f"Calling {service_name} API: {razer_url}")
         try:
-            response = requests.get(razer_zzz_url, headers=headers, timeout=8)
+            response = requests.get(razer_url, headers=razer_headers, timeout=8)
             response.raise_for_status()
             data = response.json()
-            logger.info(f"Razer API response for ZZZ: {data}")
+            logger.info(f"{service_name} API response: {data}")
+
             if data.get("status") == "success" and data.get("username"):
                 return jsonify({"status": "success", "username": data["username"]})
             elif data.get("status") == "fail" and data.get("message"):
-                 return jsonify({"status": "error", "message": data["message"]})
+                return jsonify({"status": "error", "message": data["message"]})
             else:
-                logger.warning(f"Unexpected JSON response structure from Razer (ZZZ): {data}")
-                return jsonify({"status": "error", "message": "Unexpected response from Razer for ZZZ."})
+                logger.warning(f"Unexpected JSON response structure from {service_name}: {data}")
+                return jsonify({"status": "error", "message": f"Unexpected response from {service_name}."})
+
         except requests.exceptions.HTTPError as errh:
-            # Similar error handling as Genshin
-            error_message = f"Razer API HTTP Error (ZZZ): {str(errh)}"
+            error_message = f"{service_name} API HTTP Error"
             try:
                 error_data = errh.response.json()
                 error_message = error_data.get("message", str(errh.response.text[:200]))
             except ValueError:
                 error_message = str(errh.response.text[:200]) if errh.response.text else str(errh)
-            logger.error(f"HTTPError calling Razer for ZZZ: {error_message} (Status: {errh.response.status_code})")
+            logger.error(f"HTTPError calling {service_name}: {error_message} (Status: {errh.response.status_code})")
             return jsonify({"status": "error", "message": error_message}), errh.response.status_code
-        # ... (add other exception handling for ZZZ like Timeout, RequestException, ValueError) ...
         except requests.exceptions.Timeout:
-            logger.error("Timeout calling Razer API for ZZZ.")
-            return jsonify({"status": "error", "message": "Request to Razer API (ZZZ) timed out."}), 504
+            logger.error(f"Timeout calling {service_name} API.")
+            return jsonify({"status": "error", "message": f"Request to {service_name} API timed out."}), 504
         except requests.exceptions.RequestException as e:
-            logger.error(f"RequestException calling Razer for ZZZ: {str(e)}")
-            return jsonify({"status": "error", "message": f"Razer API Request Error (ZZZ): {str(e)}"}), 500
+            logger.error(f"RequestException calling {service_name}: {str(e)}")
+            return jsonify({"status": "error", "message": f"{service_name} API Request Error: {str(e)}"}), 500
         except ValueError:
-            logger.error("ValueError (JSONDecodeError) parsing Razer response for ZZZ.")
-            return jsonify({"status": "error", "message": "Invalid JSON response from Razer (ZZZ)."}), 500
-
+            logger.error(f"ValueError (JSONDecodeError) parsing {service_name} response.")
+            return jsonify({"status": "error", "message": f"Invalid JSON response from {service_name}."}), 500
 
     # --- Smile.One API (for other games) ---
     elif game in SMILE_ONE_PRODUCT_IDS:
@@ -154,15 +135,15 @@ def check_smile_one_proxy(game, uid, server_id=None):
             "merchant_id": SMILE_ONE_MERCHANT_ID,
             "product_id": product_id,
             "game_user_id": uid,
-            "key": SMILE_ONE_KEY, # This should be calculated based on Smile.One's signature rules
+            "user_id": SMILE_ONE_USER_ID, # Smile.One's own User ID for your account
+            # "key": SMILE_ONE_SECRET_KEY # The 'key' is usually a signature, not the secret directly
         }
-        if server_id and server_id != "null" and server_id != "-1": # Smile.One might need zone_id
-            params["game_zone_id"] = server_id 
+        # Add game_zone_id if server_id is present and meaningful for Smile.One
+        if server_id and server_id != "null" and server_id != "" and server_id != "-1":
+            params["game_zone_id"] = server_id
         
-        # Note: Smile.One key generation is complex and involves hashing.
-        # This example assumes 'key' is a pre-shared secret or that you have the logic elsewhere.
-        # For a real Smile.One integration, you'd need to implement their signature algorithm.
-        # For now, this is a placeholder for how you *might* call it if 'key' was simple.
+        # Generate Smile.One signature (important for live environment)
+        params["key"] = generate_smile_one_signature(params, SMILE_ONE_SECRET_KEY)
 
         logger.info(f"Calling Smile.One API with params: {params} (URL: {SMILE_ONE_API_URL})")
         try:
@@ -171,26 +152,23 @@ def check_smile_one_proxy(game, uid, server_id=None):
             data = response.json()
             logger.info(f"Smile.One API response for {game}: {data}")
 
-            # Smile.One responses vary. Adapt this based on actual responses.
-            # Example: {"status":200,"message":"OK","username":"PlayerName"}
-            # Example Error: {"status":500, "message":"Invalid User"}
-            if data.get("status") == 200 and data.get("username"): # Assuming 200 is success status code in JSON
+            if str(data.get("status")) == "200" and data.get("username"):
                 return jsonify({"status": "success", "username": data["username"]})
-            elif data.get("status") == 200 and data.get("message") == "OK": # For cases like old Genshin verify
-                 return jsonify({"status": "success", "message": "Account Verified"}) # No username
+            elif str(data.get("status")) == "200" and data.get("message") == "OK": # Old verification style
+                 return jsonify({"status": "success", "message": "Account Verified"})
             else:
-                error_msg = data.get("message", "Unknown error from Smile.One.")
+                error_msg = data.get("message", f"Unknown error from Smile.One (Status: {data.get('status')}).")
                 return jsonify({"status": "error", "message": error_msg})
         except requests.exceptions.HTTPError as errh:
             logger.error(f"HTTPError calling Smile.One for {game}: {str(errh)}")
-            return jsonify({"status": "error", "message": f"Smile.One API HTTP Error: {str(errh)}"}), errh.response.status_code
+            return jsonify({"status": "error", "message": f"Smile.One API HTTP Error: {str(errh.response.text[:100])}"}), errh.response.status_code
         except requests.exceptions.Timeout:
             logger.error(f"Timeout calling Smile.One for {game}.")
             return jsonify({"status": "error", "message": "Request to Smile.One API timed out."}), 504
         except requests.exceptions.RequestException as e:
             logger.error(f"RequestException calling Smile.One for {game}: {str(e)}")
             return jsonify({"status": "error", "message": f"Smile.One API Request Error: {str(e)}"}), 500
-        except ValueError: # JSONDecodeError
+        except ValueError:
             logger.error(f"ValueError parsing Smile.One response for {game}.")
             return jsonify({"status": "error", "message": "Invalid JSON response from Smile.One."}), 500
             
@@ -202,31 +180,26 @@ def check_smile_one_proxy(game, uid, server_id=None):
 @app.route('/check-netease/identityv/<server_id>/<role_id>', methods=['GET'])
 def check_netease_identityv_proxy(server_id, role_id):
     logger.info(f"Received Netease IDV check request for Server: {server_id}, Role ID: {role_id}")
-    # Example params; these will vary based on Netease's actual requirements
     payload = {
-        "game": "g37",  # Or whatever Identity V's game code is
+        "game": "g37",
         "roleid": role_id,
         "serverid": server_id,
-        "check_type": "user_info" # Or similar parameter
-        # May need other parameters like "token", "sign", "timestamp" etc.
+        "check_type": "user_info" 
+        # Netease APIs often require a complex signature (sign, token, timestamp).
+        # This is a placeholder and will likely fail without proper auth.
     }
     headers = {
-        'Content-Type': 'application/x-www-form-urlencoded', # Or 'application/json'
+        'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': 'Mozilla/5.0',
-        # Add other required headers
     }
 
     try:
-        # Netease might use POST or GET, adjust accordingly
         response = requests.post(NETEASE_IDV_API_URL, data=payload, headers=headers, timeout=7)
         response.raise_for_status()
         data = response.json()
         logger.info(f"Netease IDV API response: {data}")
 
-        # Adapt this to actual Netease response structure
-        # Example success: {"code": 0, "userInfo": {"rolename": "PlayerName"}}
-        # Example error: {"code": 1, "msg": "User not found"}
-        if data.get("code") == 0 and data.get("userInfo", {}).get("rolename"):
+        if str(data.get("code")) == "0" and data.get("userInfo", {}).get("rolename"):
             return jsonify({"status": "success", "username": data["userInfo"]["rolename"]})
         else:
             error_msg = data.get("msg", "Invalid Role ID or Server for Identity V.")
@@ -246,5 +219,9 @@ def check_netease_identityv_proxy(server_id, role_id):
         return jsonify({"status": "error", "message": "Invalid JSON response from Netease IDV."}), 500
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5001)) # Render typically sets PORT env var
-    app.run(host='0.0.0.0', port=port)
+    # For local development, Gunicorn isn't typically used this way.
+    # This is more for how Gunicorn might be invoked by Render.
+    # When running locally: python app.py
+    # Render will use your Procfile (e.g., web: gunicorn app:app)
+    port = int(os.environ.get("PORT", 5001)) 
+    app.run(host='0.0.0.0', port=port, debug=True) # Added debug=True for local dev
