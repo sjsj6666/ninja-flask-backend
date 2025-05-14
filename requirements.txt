@@ -1,4 +1,5 @@
-Flask==3.0.3
-flask-cors==5.0.0
-requests==2.32.3
-gunicorn==23.0.0
+Flask
+Flask-CORS
+requests
+python-dotenv  # Add this line
+gunicorn       # If you are using gunicorn, keep it
