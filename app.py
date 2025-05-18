@@ -64,14 +64,15 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
 
     url = endpoints[game_code_for_smileone]
     current_headers = SMILE_ONE_HEADERS.copy()
-    # More specific referers if needed by Smile.One for certain games
     referer_map = {
         "mobilelegends": "https://www.smile.one/merchant/mobilelegends",
-        "honkaistarrail": "https://www.smile.one/br/merchant/honkai", # Example
-        # Add other specific referers if known to be required
+        "honkaistarrail": "https://www.smile.one/br/merchant/honkai",
+        "bloodstrike": "https://www.smile.one/br/merchant/game/bloodstrike",
+        "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic",
+        "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace",
+        "bigolive": "https://www.smile.one/sg/merchant/bigo"
     }
     current_headers["Referer"] = referer_map.get(game_code_for_smileone, f"https://www.smile.one/merchant/{game_code_for_smileone}")
-
 
     pid_to_use = specific_smileone_pid
     if not pid_to_use:
@@ -91,7 +92,7 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
     if game_code_for_smileone == "mobilelegends": params.update({"user_id": uid, "zone_id": server_id})
     elif game_code_for_smileone in ["honkaistarrail", "ragnarokmclassic", "loveanddeepspace"]: params.update({"uid": uid, "sid": server_id})
     elif game_code_for_smileone == "bloodstrike": params.update({"uid": uid, "sid": server_id})
-    elif game_code_for_smileone == "bigolive": params.update({"uid": uid, "product": "bigosg"}) # Example
+    elif game_code_for_smileone == "bigolive": params.update({"uid": uid, "product": "bigosg"})
 
     logging.info(f"Sending SmileOne: {game_code_for_smileone}, URL={url}, PID={pid_to_use}, Params={params}")
     try:
@@ -105,7 +106,7 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
             name_key = "username" if game_code_for_smileone == "mobilelegends" else \
                        "message" if game_code_for_smileone == "bigolive" else "nickname"
             username = data.get(name_key)
-            if not username or not isinstance(username, str) or not username.strip(): # Fallback
+            if not username or not isinstance(username, str) or not username.strip():
                 for alt_key in ["username", "nickname", "role_name", "name", "char_name", "message"]:
                     if alt_key == name_key: continue
                     username = data.get(alt_key)
@@ -116,7 +117,7 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
                  return {"status": "success", "message": "Account Verified (No username from API)"}
             return {"status": "error", "message": "Username not found in API response (Code 200)"}
         return {"status": "error", "message": data.get("message", data.get("info", f"API error (Code: {data.get('code')})"))}
-    except ValueError: # JSONDecodeError
+    except ValueError:
         if game_code_for_smileone == "loveanddeepspace" and "<span class=\"name\">" in raw_text and "uid_error_tips" not in raw_text:
             try:
                 start_idx = raw_text.find("<span class=\"name\">") + len("<span class=\"name\">")
@@ -160,7 +161,7 @@ def check_identityv_api(server_frontend_key, roleid):
     except requests.RequestException as e: return {"status": "error", "message": f"Netease API Connection Error ({getattr(e.response, 'status_code', 'N/A')})"}
     except Exception: logging.exception("Unexpected error (IDV)"); return {"status": "error", "message": "Unexpected server error (IDV)"}
 
-def check_razer_api(game_slug, user_id, server_id_frontend_key):
+def check_razer_api(game_slug, user_id, server_id_frontend_key): # Renamed server_id to server_id_frontend_key for clarity
     api_details = {
         "genshin-impact": {"url_template": RAZER_GOLD_GENSHIN_API_URL_TEMPLATE, "headers": RAZER_GOLD_GENSHIN_HEADERS, "server_map": None, "name": "Genshin"},
         "zenless-zone-zero": {"url_template": RAZER_GOLD_ZZZ_API_URL_TEMPLATE, "headers": RAZER_GOLD_ZZZ_HEADERS, "server_map": RAZER_ZZZ_SERVER_ID_MAP, "name": "ZZZ"},
@@ -169,25 +170,28 @@ def check_razer_api(game_slug, user_id, server_id_frontend_key):
     if game_slug not in api_details: return {"status": "error", "message": f"Razer API config not found for {game_slug}"}
 
     config = api_details[game_slug]
-    api_server_id = server_id_frontend_key
-    if config["server_map"]: # Map frontend server key to Razer's API serverId if needed (like for ZZZ)
-        api_server_id = config["server_map"].get(server_id_frontend_key)
-        if not api_server_id: return {"status": "error", "message": f"Invalid server config ({config['name']})"}
+    api_server_id_param_value = server_id_frontend_key # Default: use frontend key directly (e.g., Genshin, RO Origin which expects numeric)
+    
+    if config["server_map"]: # If a mapping exists (like for ZZZ)
+        api_server_id_param_value = config["server_map"].get(server_id_frontend_key)
+        if not api_server_id_param_value: return {"status": "error", "message": f"Invalid server config ({config['name']}) for key '{server_id_frontend_key}'"}
     
     url = config["url_template"].format(user_id=user_id)
-    params = {"serverId": api_server_id} if api_server_id else {} # Only add serverId if applicable
+    params = {"serverId": api_server_id_param_value} if api_server_id_param_value else {} 
     
     logging.info(f"Sending Razer {config['name']}: URL={url}, Params={params}")
     try:
         response = requests.get(url, params=params, headers=config["headers"], timeout=10)
-        raw_text = response.text; logging.info(f"Razer {config['name']} Raw (UID:{user_id}, ServerKey:{server_id_frontend_key}): {raw_text}")
+        raw_text = response.text; logging.info(f"Razer {config['name']} Raw (UID:{user_id}, FrontendSrvKey:{server_id_frontend_key}, APISrvVal:{api_server_id_param_value}): {raw_text}")
         data = response.json(); logging.info(f"Razer {config['name']} JSON: {data}")
 
         if response.status_code == 200:
-            # Attempt to get username from common keys or game-specific structures
-            username = data.get("username") or data.get("name")
-            if game_slug == "ragnarok-origin" and "roles" in data and isinstance(data["roles"], list) and data["roles"]:
-                username = data["roles"][0].get("Name") or username # Prioritize 'roles[0].Name' for RO
+            username = None
+            if game_slug == "ragnarok-origin": # Specific parsing for RO Origin
+                if "roles" in data and isinstance(data["roles"], list) and data["roles"]:
+                    username = data["roles"][0].get("Name")
+            else: # General parsing for other Razer games (Genshin, ZZZ)
+                username = data.get("username") or data.get("name")
 
             if username and isinstance(username, str) and username.strip():
                 return {"status": "success", "username": username.strip()}
@@ -195,21 +199,23 @@ def check_razer_api(game_slug, user_id, server_id_frontend_key):
             api_code = data.get("code")
             api_msg = data.get("message")
             if api_code == 77003 and api_msg == "Invalid game user credentials": return {"status": "error", "message": f"Invalid User ID or Server ({config['name']})"}
-            elif api_code == 0: # Generic success for Razer if username wasn't directly found
+            elif api_code == 0: # Generic Razer success if username wasn't directly found
+                alt_name = data.get("name") or data.get("data", {}).get("name") # Try another common key
+                if alt_name and alt_name.strip(): return {"status": "success", "username": alt_name.strip()}
                 return {"status": "success", "message": f"Account Verified (Razer {config['name']} Nickname N/A)"}
             return {"status": "error", "message": api_msg or f"Unknown success response (Razer {config['name']})"}
         
+        # Handle non-200 HTTP status from Razer
         error_msg = data.get("message", f"Razer API HTTP Error ({config['name']}): {response.status_code}")
         return {"status": "error", "message": error_msg}
     except ValueError: 
-        logging.error(f"JSON Parse Err (Razer {config['name']}). Status: {response.status_code}. Raw: {raw_text}")
+        logging.error(f"JSON Parse Err (Razer {config['name']}). Status: {response.status_code if 'response' in locals() else 'N/A'}. Raw: {raw_text}")
         if "<html" in raw_text.lower(): return {"status": "error", "message": f"Razer API check blocked ({config['name']})"}
-        return {"status": "error", "message": f"Invalid API response (Razer {config['name']}, Status: {response.status_code})"}
+        return {"status": "error", "message": f"Invalid API response (Razer {config['name']}, Status: {response.status_code if 'response' in locals() else 'N/A'})"}
     except requests.Timeout: return {"status": "error", "message": f"API Timeout (Razer {config['name']})"}
     except requests.RequestException as e:
         return {"status": "error", "message": f"Razer API Connection Error ({config['name']}, Status: {getattr(e.response, 'status_code', 'N/A')})"}
     except Exception: logging.exception(f"Unexpected error (Razer {config['name']})"); return {"status": "error", "message": f"Unexpected server error (Razer {config['name']})"}
-
 
 # --- Flask Routes ---
 @app.route('/')
@@ -221,46 +227,61 @@ def home():
 def check_game_id(game_slug_from_frontend, uid, server_id):
     game_lower = game_slug_from_frontend.lower()
     result = {}
-    intended_region_display = None 
+    intended_region_display = None
 
-    # Validate UID format for games that expect numeric UIDs (most Smile.One games)
-    if game_lower not in ["ragnarok-origin", "identity-v"] and (not uid or not uid.isdigit()): # RO and IDV can have non-numeric
-        return jsonify({"status": "error", "message": "Invalid UID format. UID must be numeric."}), 400
-    elif game_lower in ["ragnarok-origin", "identity-v"] and not uid: # UID still required
-         return jsonify({"status": "error", "message": "User ID/Role ID is required."}), 400
+    # Basic UID validation (alphanumeric check is now inside specific handlers if needed)
+    if not uid:
+        return jsonify({"status": "error", "message": "User ID/Role ID is required."}), 400
 
-
+    # --- Mobile Legends Variants (using Smile.One) ---
     if game_lower == "mobile-legends-sg":
         intended_region_display = "SG"
-        smileone_pid = os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE", "YOUR_SG_PID_HERE") # Replace with actual SG PID
-        if not server_id or not server_id.isdigit(): return jsonify({"status": "error", "message": "Numeric Server ID for MLBB SG."}), 400
+        smileone_pid = os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE", "YOUR_MLBB_SG_CHECKROLE_PID_HERE") # IMPORTANT
+        if not server_id or not server_id.isdigit(): return jsonify({"status": "error", "message": "Numeric Server ID required for MLBB SG."}), 400
         result = check_smile_one_api("mobilelegends", uid, server_id, specific_smileone_pid=smileone_pid)
     elif game_lower == "mobile-legends": 
         intended_region_display = "ID" 
         smileone_pid = os.environ.get("SMILE_ONE_PID_MLBB_ID_CHECKROLE", "25") 
-        if not server_id or not server_id.isdigit(): return jsonify({"status": "error", "message": "Numeric Server ID for MLBB."}), 400
+        if not server_id or not server_id.isdigit(): return jsonify({"status": "error", "message": "Numeric Server ID required for MLBB."}), 400
         result = check_smile_one_api("mobilelegends", uid, server_id, specific_smileone_pid=smileone_pid)
     
+    # --- Razer Gold Integrated Games ---
     elif game_lower == "genshin-impact":
-        if not server_id: return jsonify({"status": "error", "message": "Server ID for Genshin Impact."}), 400
-        if server_id == "os_asia": intended_region_display = "Asia" # Example, refine as needed
-        # ... other Genshin server to region mappings for display ...
+        if not server_id: return jsonify({"status": "error", "message": "Server ID required for Genshin Impact."}), 400
+        if server_id == "os_asia": intended_region_display = "Asia"
+        elif server_id == "os_usa": intended_region_display = "America"
+        elif server_id == "os_euro": intended_region_display = "Europe"
+        elif server_id == "os_cht": intended_region_display = "TW/HK/MO"
+        else: intended_region_display = "Unknown Server" # Default if server_id doesn't match
         result = check_razer_api(game_lower, uid, server_id)
     elif game_lower == "zenless-zone-zero":
-        if not server_id: return jsonify({"status": "error", "message": "Server for ZZZ."}), 400
-        if "asia" in server_id: intended_region_display = "Asia" # Example
-        result = check_razer_api(game_lower, uid, server_id)
+        if not server_id: return jsonify({"status": "error", "message": "Server selection required for ZZZ."}), 400
+        if RAZER_ZZZ_SERVER_ID_MAP.get(server_id): # Check if the frontend key is valid
+            if "asia" in server_id: intended_region_display = "Asia"
+            elif "usa" in server_id: intended_region_display = "America"
+            elif "eur" in server_id: intended_region_display = "Europe"
+            elif "cht" in server_id: intended_region_display = "TW/HK/MO"
+            else: intended_region_display = "Mapped Server"
+            result = check_razer_api(game_lower, uid, server_id)
+        else:
+            return jsonify({"status": "error", "message": "Invalid server key for ZZZ."}), 400
+            
     elif game_lower == "ragnarok-origin":
-        if not server_id or not server_id.isdigit(): return jsonify({"status": "error", "message": "Numeric Server ID for Ragnarok Origin."}), 400
-        intended_region_display = "MY" # Example: Product context for RO on your site
-        result = check_razer_api(game_lower, uid, server_id)
+        if not server_id or not server_id.isdigit(): 
+            return jsonify({"status": "error", "message": "Numeric Server ID required for Ragnarok Origin."}), 400
+        intended_region_display = "MY" # Default for your RO product, adjust if needed
+        result = check_razer_api(game_lower, uid, server_id) # UID can be alphanumeric
         
+    # --- Netease Identity V ---
     elif game_lower == "identity-v":
-        if not server_id or server_id.lower() not in IDV_SERVER_CODES: return jsonify({"status": "error", "message": "Valid server (Asia or NA-EU) for IDV."}), 400
+        if not uid.isdigit(): return jsonify({"status": "error", "message": "Numeric Role ID required for Identity V."}), 400
+        if not server_id or server_id.lower() not in IDV_SERVER_CODES:
+            return jsonify({"status": "error", "message": "Valid server (Asia or NA-EU) for IDV."}), 400
         if server_id.lower() == "asia": intended_region_display = "Asia"
         elif server_id.lower() == "na-eu": intended_region_display = "NA-EU"
         result = check_identityv_api(server_id, uid) 
         
+    # --- Other Smile.One Games ---
     elif game_lower in ["honkai-star-rail", "bloodstrike", "ragnarok-m-classic", "love-and-deepspace", "bigo-live"]:
         smileone_game_code_map = {
             "honkai-star-rail": "honkaistarrail", "bloodstrike": "bloodstrike",
@@ -268,11 +289,14 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
             "bigo-live": "bigolive"
         }
         smileone_game_code = smileone_game_code_map.get(game_lower)
-        if not smileone_game_code: return jsonify({"status": "error", "message": f"Game '{game_lower}' not configured for SmileOne."}), 400
+        if not smileone_game_code: return jsonify({"status": "error", "message": f"Game '{game_lower}' not configured."}), 400
         
         if game_lower == "honkai-star-rail" and not server_id: return jsonify({"status": "error", "message": "Server ID for HSR."}), 400
         if game_lower == "love-and-deepspace" and (not server_id or not server_id.isdigit()): return jsonify({"status": "error", "message": "Numeric Server ID for L&D."}), 400
-        
+        if game_lower == "bloodstrike" and (not server_id or server_id != "-1"): return jsonify({"status": "error", "message": "Invalid server for Bloodstrike."}), 400
+        if game_lower == "ragnarok-m-classic" and (not server_id or server_id != "50001"): return jsonify({"status": "error", "message": "Invalid server for RO Classic."}), 400
+        # Bigo does not use server_id in check_smile_one_api
+
         result = check_smile_one_api(smileone_game_code, uid, server_id)
     else:
         return jsonify({"status": "error", "message": f"Validation not configured for: {game_slug_from_frontend}"}), 400
@@ -299,4 +323,4 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     return jsonify(final_response_data_cleaned), status_code_http
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=port, debug=False) # Set debug=False for production
+    app.run(host='0.0.0.0', port=port, debug=False) # debug=False for production
