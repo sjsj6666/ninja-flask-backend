@@ -5,23 +5,23 @@ import os
 import logging
 import time
 import uuid # For Netease traceid
+import json # For Nuverse x-tea-payload
 
 app = Flask(__name__)
 
 # Define allowed origins
 allowed_origins = [
-    "http://127.0.0.1:5500", # Your local VS Code Live Server or similar
-    "http://localhost:5500",  # Alternative local address
-    "https://coxx.netlify.app"  # Your deployed Netlify site
+    "http://127.0.0.1:5500",
+    "http://localhost:5500",
+    "https://coxx.netlify.app"
 ]
-
-# Apply CORS with specific origins
 CORS(app, resources={r"/check-id/*": {"origins": allowed_origins}}, supports_credentials=True)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 5000))
 
 # --- Smile One Config ---
+# ... (existing Smile One config) ...
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -32,6 +32,7 @@ SMILE_ONE_HEADERS = {
 }
 
 # --- Netease Identity V Config ---
+# ... (existing Netease config) ...
 NETEASE_IDV_BASE_URL_TEMPLATE = "https://pay.neteasegames.com/gameclub/identityv/{server_code}/login-role"
 NETEASE_IDV_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
@@ -42,47 +43,49 @@ NETEASE_IDV_HEADERS = {
 NETEASE_IDV_STATIC_PARAMS = { "gc_client_version": "1.9.111", "client_type": "gameclub" }
 IDV_SERVER_CODES = { "asia": "2001", "na-eu": "2011" }
 
+
 # --- Razer Gold API Config ---
+# ... (existing Razer Gold config for Genshin, ZZZ, RO Origin, Snowbreak) ...
 RAZER_GOLD_COMMON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
     "Accept": "application/json, text/plain, */*",
     "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin",
 }
-
-# Genshin Impact
 RAZER_GOLD_GENSHIN_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/genshinimpact/users/{user_id}"
 RAZER_GOLD_GENSHIN_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy()
 RAZER_GOLD_GENSHIN_HEADERS["Referer"] = "https://gold.razer.com/sg/en/gold/catalog/genshin-impact"
-
-# Zenless Zone Zero
 RAZER_GOLD_ZZZ_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/custom/cognosphere-zenless-zone-zero/users/{user_id}"
 RAZER_GOLD_ZZZ_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy()
 RAZER_GOLD_ZZZ_HEADERS["Referer"] = "https://gold.razer.com/sg/en/gold/catalog/zenless-zone-zero"
-RAZER_ZZZ_SERVER_ID_MAP = {
-    "prod_official_asia": "prod_gf_jp",
-    "prod_official_usa": "prod_gf_us",
-    "prod_official_eur": "prod_gf_eu",
-    "prod_official_cht": "prod_gf_sg"
-}
-
-# Ragnarok Origin
+RAZER_ZZZ_SERVER_ID_MAP = {"prod_official_asia": "prod_gf_jp","prod_official_usa": "prod_gf_us","prod_official_eur": "prod_gf_eu","prod_official_cht": "prod_gf_sg"}
 RAZER_GOLD_RO_ORIGIN_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/custom/gravity-ragnarok-origin/users/{user_id}"
 RAZER_GOLD_RO_ORIGIN_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy()
 RAZER_GOLD_RO_ORIGIN_HEADERS["Referer"] = "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin"
-
-# Snowbreak: Containment Zone (NEW)
 RAZER_GOLD_SNOWBREAK_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/custom/seasun-games-snowbreak-containment-zone/users/{user_id}"
 RAZER_GOLD_SNOWBREAK_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy()
-RAZER_GOLD_SNOWBREAK_HEADERS["Referer"] = "https://gold.razer.com/my/en/gold/catalog/snowbreak-containment-zone" # Using MY referer as per log
-RAZER_SNOWBREAK_SERVER_ID_MAP = {
-    "sea": "215",       # Southeast Asia
-    "asia": "225",      # Asia
-    "americas": "235",  # Americas
-    "europe": "245"     # Europe
+RAZER_GOLD_SNOWBREAK_HEADERS["Referer"] = "https://gold.razer.com/my/en/gold/catalog/snowbreak-containment-zone"
+RAZER_SNOWBREAK_SERVER_ID_MAP = {"sea": "215","asia": "225","americas": "235","europe": "245"}
+
+# --- Nuverse API Config (NEW for ROX) ---
+NUVERSE_ROX_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
+NUVERSE_ROX_AID = "3402" # Application ID for ROX, from your log
+NUVERSE_ROX_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
+    "Accept": "*/*", # As per log
+    "Referer": f"https://pay.nvsgames.com/topup/{NUVERSE_ROX_AID}/sg-en", # Modify locale (sg-en) if needed
+    "x-appid": NUVERSE_ROX_AID,
+    "x-language": "en", # Can be dynamic if you pass lang from frontend
+    "x-scene": "0",
+    # "x-web-token": "undefined", # This seems optional or dynamically set by their SDK
+    # "Cookie": "i18next=en; s_v_web_id=verify_...", # Cookies are usually handled by the session
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
 }
 
 # --- API Check Functions ---
 
+# ... (check_smile_one_api - no changes) ...
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
     endpoints = {
         "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole",
@@ -129,7 +132,7 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
     elif game_code_for_smileone == "bigolive": params.update({"uid": uid, "product": "bigosg"})
 
     logging.info(f"Sending SmileOne: Game='{game_code_for_smileone}', URL='{url}', PID='{pid_to_use}', Params={params}")
-    raw_text = "" # Initialize raw_text
+    raw_text = ""
     try:
         req_url = f"{url}?product=bloodstrike" if game_code_for_smileone == "bloodstrike" else url
         response = requests.post(req_url, data=params, headers=current_headers, timeout=10)
@@ -177,6 +180,7 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
         return {"status": "error", "message": "Unexpected server error (SmileOne)"}
 
 
+# ... (check_identityv_api - no changes) ...
 def check_identityv_api(server_frontend_key, roleid):
     server_code = IDV_SERVER_CODES.get(server_frontend_key.lower())
     if not server_code: return {"status": "error", "message": "Invalid server specified for Identity V."}
@@ -192,7 +196,7 @@ def check_identityv_api(server_frontend_key, roleid):
     current_headers["X-TASK-ID"] = f"transid={params['traceid']},uni_transaction_id=default"
 
     logging.info(f"Sending Netease IDV: URL='{url}', Params={params}")
-    raw_text = "" # Initialize raw_text
+    raw_text = ""
     try:
         response = requests.get(url, params=params, headers=current_headers, timeout=10)
         raw_text = response.text
@@ -224,6 +228,7 @@ def check_identityv_api(server_frontend_key, roleid):
         return {"status": "error", "message": "Unexpected server error (IDV)"}
 
 
+# ... (check_razer_api - no changes, already handles new games via api_details) ...
 def check_razer_api(game_slug, user_id, server_id_frontend_key):
     api_details = {
         "genshin-impact": {"url_template": RAZER_GOLD_GENSHIN_API_URL_TEMPLATE, "headers": RAZER_GOLD_GENSHIN_HEADERS, "server_map": None, "name": "Genshin Impact"},
@@ -240,15 +245,15 @@ def check_razer_api(game_slug, user_id, server_id_frontend_key):
         api_server_id_param_value = config["server_map"].get(server_id_frontend_key)
         if not api_server_id_param_value:
             return {"status": "error", "message": f"Invalid server configuration for {config['name']} using frontend key '{server_id_frontend_key}'"}
-    elif game_slug in ["genshin-impact", "ragnarok-origin"]:
+    elif game_slug in ["genshin-impact", "ragnarok-origin"]: # These take frontend key directly
         api_server_id_param_value = server_id_frontend_key
-    # If game_slug is neither and doesn't have a server_map, api_server_id_param_value remains None.
+    # If not mapped and not in the direct list, api_server_id_param_value remains None (e.g. for games not needing serverId in query for validation)
 
     url = config["url_template"].format(user_id=user_id)
     params = {"serverId": api_server_id_param_value} if api_server_id_param_value else {}
 
     logging.info(f"Sending Razer {config['name']}: URL='{url}', Params={params}")
-    raw_text = "" # Initialize raw_text
+    raw_text = ""
     try:
         response = requests.get(url, params=params, headers=config["headers"], timeout=10)
         raw_text = response.text
@@ -261,24 +266,24 @@ def check_razer_api(game_slug, user_id, server_id_frontend_key):
             if game_slug == "ragnarok-origin":
                 if "roles" in data and isinstance(data["roles"], list) and data["roles"]:
                     username = data["roles"][0].get("Name")
-            elif game_slug == "snowbreak":
+            elif game_slug == "snowbreak": # Snowbreak API returns 'username'
                 username = data.get("username")
-            else:
+            else: # Genshin, ZZZ
                 username = data.get("username") or data.get("name")
 
             if username and isinstance(username, str) and username.strip():
                 return {"status": "success", "username": username.strip()}
-            
+
             api_code = data.get("code")
             api_msg = data.get("message")
             if api_code == 77003 and api_msg == "Invalid game user credentials":
                  return {"status": "error", "message": f"Invalid User ID or Server ({config['name']})"}
-            elif api_code == 0:
+            elif api_code == 0: # Razer's generic success code
                 alt_name = data.get("name") or data.get("data", {}).get("name")
                 if alt_name and alt_name.strip(): return {"status": "success", "username": alt_name.strip()}
                 return {"status": "success", "message": f"Account Verified (Razer {config['name']} - Nickname not directly available)"}
             return {"status": "error", "message": api_msg or f"Unknown success response format (Razer {config['name']})"}
-        
+
         error_msg_from_api = data.get("message", f"Razer API HTTP Error ({config['name']}): {response.status_code}")
         return {"status": "error", "message": error_msg_from_api}
     except ValueError:
@@ -295,6 +300,86 @@ def check_razer_api(game_slug, user_id, server_id_frontend_key):
         logging.exception(f"Unexpected error during Razer API call for {config['name']}: {e_unexp}")
         return {"status": "error", "message": f"Unexpected server error (Razer {config['name']})"}
 
+def check_nuverse_rox_api(role_id):
+    """
+    Checks Ragnarok X: Next Generation Role ID using Nuverse API.
+    server_id is not directly used in the validation query parameters for this specific API,
+    but server context might be part of x-tea-payload if it were more complex.
+    """
+    params = {
+        "tab": "purchase",
+        "aid": NUVERSE_ROX_AID,
+        "role_id": role_id
+    }
+    current_headers = NUVERSE_ROX_HEADERS.copy()
+    # Construct a basic x-tea-payload. More fields might be needed for stricter validation.
+    # The one from your log is very detailed, but often a simpler one works for basic role checks.
+    tea_payload_data = {
+        "role_id": role_id,
+        "user_unique_id": None, # Or a consistent placeholder
+        "environment": "online",
+        "payment_channel": "out_pay_shop", # From log
+        "pay_way": "out_app_pay", # From log
+        "aid": NUVERSE_ROX_AID,
+        "session_id": str(uuid.uuid4()), # Dynamic session_id
+        "page_instance":"game", # From log
+        "geo":"SG", # Can be made dynamic
+        "url": f"https://pay.nvsgames.com/topup/{NUVERSE_ROX_AID}/sg-en", # Referer-like URL
+        "language":"en",
+        "x-scene":0,
+        "req_id": str(uuid.uuid4()), # Dynamic req_id
+        "timestamp": int(time.time() * 1000),
+        # "web_id": "some_consistent_or_dynamic_web_id", # If needed
+        # "ip_address": "client_ip_if_available_or_proxy_ip", # If needed
+        # "refer_url": "originating_referer_if_available", # If needed
+        # "local_os": "browser_os_if_available", # If needed
+        # "sdk_open_id": "sdk_open_id_if_available", # If available from client or a placeholder
+        # "server_id": "captured_server_id_from_frontend_if_needed_here",
+    }
+    current_headers["x-tea-payload"] = json.dumps(tea_payload_data)
+
+
+    logging.info(f"Sending Nuverse ROX: URL='{NUVERSE_ROX_VALIDATE_URL}', Params={params}")
+    raw_text = ""
+    try:
+        response = requests.get(NUVERSE_ROX_VALIDATE_URL, params=params, headers=current_headers, timeout=10)
+        raw_text = response.text
+        logging.info(f"Nuverse ROX Raw Response (RoleID:{role_id}): {raw_text}")
+        data = response.json()
+        logging.info(f"Nuverse ROX Parsed JSON: {data}")
+
+        if data.get("code") == 0 and data.get("message", "").lower() == "success":
+            if "data" in data and isinstance(data["data"], list) and len(data["data"]) > 0:
+                role_info = data["data"][0]
+                username = role_info.get("role_name")
+                server_name = role_info.get("server_name") # Can be used to enrich the response
+                if username and username.strip():
+                    # You can choose to include server_name in the success message or username
+                    # For consistency with other APIs, we'll primarily return username.
+                    # Frontend can display server_name if it receives it.
+                    return {"status": "success", "username": username.strip(), "server_name": server_name}
+                return {"status": "success", "message": "Role ID Verified (Username not available)", "server_name": server_name}
+            return {"status": "error", "message": "Role ID not found or invalid (No data)"}
+        else:
+            error_message = data.get("message", "Unknown error from Nuverse API")
+            if data.get("code") == 20012: # Example error code for invalid role
+                 error_message = "Invalid Role ID (Nuverse)"
+            return {"status": "error", "message": error_message}
+
+    except ValueError:
+        logging.error(f"JSON Parse Error (Nuverse ROX). Raw: {raw_text}")
+        return {"status": "error", "message": "Invalid API response format (Nuverse ROX)"}
+    except requests.Timeout:
+        logging.warning(f"API Timeout (Nuverse ROX)")
+        return {"status": "error", "message": "API Request Timed Out (Nuverse ROX)"}
+    except requests.RequestException as e:
+        logging.error(f"API Connection Error (Nuverse ROX): {e}")
+        return {"status": "error", "message": f"API Connection Error (Nuverse ROX, Status: {getattr(e.response, 'status_code', 'N/A')})"}
+    except Exception as e_unexp:
+        logging.exception(f"Unexpected error during Nuverse ROX API call: {e_unexp}")
+        return {"status": "error", "message": "Unexpected server error (Nuverse ROX)"}
+
+
 # --- Flask Routes ---
 @app.route('/')
 def home():
@@ -305,53 +390,86 @@ def home():
 def check_game_id(game_slug_from_frontend, uid, server_id):
     game_lower = game_slug_from_frontend.lower()
     result = {}
-    intended_region_display = None
+    intended_region_display = None # This will be passed back to frontend
 
     if not uid:
         return jsonify({"status": "error", "message": "User ID/Role ID is required."}), 400
 
-    if game_lower == "mobile-legends-sg":
+    # --- Nuverse Ragnarok X: Next Generation ---
+    if game_lower == "ragnarok-x-next-generation":
+        # Role ID for ROX is typically a long number.
+        if not uid.isdigit() or len(uid) < 10: # Basic check, adjust length if needed
+             return jsonify({"status": "error", "message": "Invalid Role ID format for Ragnarok X."}), 400
+        # Server ID from frontend (e.g., "Golden Route") is not directly used in this validation query.
+        # It might be implicitly handled by Nuverse or part of a more complex `x-tea-payload`.
+        # For now, we'll pass it if available for logging/context, but not to Nuverse `params`.
+        intended_region_display = server_id if server_id else "ROX Server (auto-detected by Nuverse)"
+        result = check_nuverse_rox_api(uid)
+        # If Nuverse returns server_name, add it to intended_region_display
+        if result.get("status") == "success" and result.get("server_name"):
+            intended_region_display = result.get("server_name")
+
+    # --- Mobile Legends Variants (using Smile.One) ---
+    elif game_lower == "mobile-legends-sg":
+        # ... (existing MLBB SG logic) ...
         intended_region_display = "SG"
-        smileone_pid = os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE", "YOUR_MLBB_SG_PID_HERE") # Ensure this is set
+        smileone_pid = os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE", "YOUR_MLBB_SG_PID_HERE")
         if not server_id or not server_id.isdigit(): return jsonify({"status": "error", "message": "Numeric Server ID required for MLBB SG."}), 400
         result = check_smile_one_api("mobilelegends", uid, server_id, specific_smileone_pid=smileone_pid)
+
     elif game_lower == "mobile-legends":
+        # ... (existing MLBB ID logic) ...
         intended_region_display = "ID"
         smileone_pid = os.environ.get("SMILE_ONE_PID_MLBB_ID_CHECKROLE", "25")
         if not server_id or not server_id.isdigit(): return jsonify({"status": "error", "message": "Numeric Server ID required for MLBB."}), 400
         result = check_smile_one_api("mobilelegends", uid, server_id, specific_smileone_pid=smileone_pid)
+
+    # --- Razer Gold Integrated Games ---
     elif game_lower == "genshin-impact":
+        # ... (existing Genshin logic) ...
         if not server_id: return jsonify({"status": "error", "message": "Server ID required for Genshin Impact."}), 400
         server_display_map = {"os_asia": "Asia", "os_usa": "America", "os_euro": "Europe", "os_cht": "TW/HK/MO"}
         intended_region_display = server_display_map.get(server_id, "Unknown Genshin Server")
         result = check_razer_api(game_lower, uid, server_id)
+
     elif game_lower == "zenless-zone-zero":
+        # ... (existing ZZZ logic) ...
         if not server_id: return jsonify({"status": "error", "message": "Server selection required for ZZZ."}), 400
         if RAZER_ZZZ_SERVER_ID_MAP.get(server_id):
             server_display_map = {"prod_official_asia": "Asia", "prod_official_usa": "America", "prod_official_eur": "Europe", "prod_official_cht": "TW/HK/MO"}
             intended_region_display = server_display_map.get(server_id, "Mapped ZZZ Server")
             result = check_razer_api(game_lower, uid, server_id)
         else: return jsonify({"status": "error", "message": "Invalid server key provided for ZZZ."}), 400
+
     elif game_lower == "ragnarok-origin":
+        # ... (existing RO Origin logic) ...
         if not server_id or not server_id.isdigit(): return jsonify({"status": "error", "message": "Numeric Server ID required for Ragnarok Origin."}), 400
         intended_region_display = "MY"
         result = check_razer_api(game_lower, uid, server_id)
-    elif game_lower == "snowbreak-containment-zone": # NEW game slug from frontend
+
+    elif game_lower == "snowbreak-containment-zone":
+        # ... (existing Snowbreak logic) ...
         if not server_id: return jsonify({"status": "error", "message": "Server ID required for Snowbreak: Containment Zone."}), 400
         server_display_map = {"sea": "Southeast Asia (Snowbreak)", "asia": "Asia (Snowbreak)", "americas": "Americas (Snowbreak)", "europe": "Europe (Snowbreak)"}
         intended_region_display = server_display_map.get(server_id.lower(), "Unknown Snowbreak Server")
-        result = check_razer_api("snowbreak", uid, server_id.lower()) # Use internal slug "snowbreak"
+        result = check_razer_api("snowbreak", uid, server_id.lower())
+
+
+    # --- Netease Identity V ---
     elif game_lower == "identity-v":
+        # ... (existing IDV logic) ...
         if not uid.isdigit(): return jsonify({"status": "error", "message": "Numeric Role ID required for Identity V."}), 400
         if not server_id or server_id.lower() not in IDV_SERVER_CODES: return jsonify({"status": "error", "message": "Valid server (Asia or NA-EU) required for IDV."}), 400
         intended_region_display = "Asia (IDV)" if server_id.lower() == "asia" else "NA-EU (IDV)"
         result = check_identityv_api(server_id, uid)
+
+
+    # --- Other Smile.One Games ---
     elif game_lower in ["honkai-star-rail", "bloodstrike", "ragnarok-m-classic", "love-and-deepspace", "bigo-live"]:
+        # ... (existing logic for these SmileOne games) ...
         smileone_game_code_map = {"honkai-star-rail": "honkaistarrail", "bloodstrike": "bloodstrike", "ragnarok-m-classic": "ragnarokmclassic", "love-and-deepspace": "loveanddeepspace", "bigo-live": "bigolive"}
         smileone_game_code = smileone_game_code_map.get(game_lower)
         if not smileone_game_code: return jsonify({"status": "error", "message": f"Internal: Game '{game_lower}' not configured for SmileOne routing."}), 500
-        
-        # Server ID validation for these SmileOne games
         if game_lower == "honkai-star-rail" and not server_id: return jsonify({"status": "error", "message": "Server ID required for Honkai: Star Rail."}), 400
         if game_lower == "love-and-deepspace" and (not server_id or not server_id.isdigit()): return jsonify({"status": "error", "message": "Numeric Server ID required for Love and Deepspace."}), 400
         if game_lower == "bloodstrike" and (not server_id or server_id != "-1"): return jsonify({"status": "error", "message": "Invalid server parameter for Bloodstrike."}), 400
@@ -360,6 +478,7 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     else:
         return jsonify({"status": "error", "message": f"Validation not configured for game: {game_slug_from_frontend}"}), 400
 
+    # Determine HTTP status code for the response based on result
     status_code_http = 200
     if result.get("status") == "error":
         msg_lower = (result.get("message", "") or result.get("error", "")).lower()
@@ -368,14 +487,20 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
         elif "connection error" in msg_lower or "cannot connect" in msg_lower: status_code_http = 503
         elif "unauthorized" in msg_lower or "forbidden" in msg_lower or "rate limited" in msg_lower or "blocked" in msg_lower: status_code_http = 403
         elif "unexpected" in msg_lower or "pid not configured" in msg_lower or "pid could not be resolved" in msg_lower or "invalid server config" in msg_lower or "internal server error" in msg_lower or "remote" in msg_lower: status_code_http = 500
-        elif "invalid uid" in msg_lower or "not found" in msg_lower or "invalid user id" in msg_lower or "invalid game user credentials" in msg_lower or "invalid role id" in msg_lower or "role not exist" in msg_lower or "player found, username unavailable" in msg_lower or "user id não existe" in msg_lower or "invalid server" in msg_lower: status_code_http = 404
-        else: status_code_http = 400
+        elif "invalid uid" in msg_lower or "not found" in msg_lower or "invalid user id" in msg_lower or "invalid game user credentials" in msg_lower or "invalid role id" in msg_lower or "role not exist" in msg_lower or "player found, username unavailable" in msg_lower or "user id não existe" in msg_lower or "invalid server" in msg_lower: status_code_http = 404 # User/server not found type errors
+        else: status_code_http = 400 # Generic client error if not matched
 
     final_response_data = {
-        "status": result.get("status"), "username": result.get("username"),
-        "message": result.get("message"), "error": result.get("error"),
+        "status": result.get("status"),
+        "username": result.get("username"),
+        "message": result.get("message"),
+        "error": result.get("error"),
         "region_product_context": intended_region_display
     }
+    # Add server_name from ROX if it exists
+    if result.get("server_name"):
+        final_response_data["server_name_from_api"] = result.get("server_name")
+
     final_response_data_cleaned = {k: v for k, v in final_response_data.items() if v is not None}
 
     logging.info(f"Flask final response for {game_lower} (UID: {uid}): {final_response_data_cleaned}, HTTP Status: {status_code_http}")
