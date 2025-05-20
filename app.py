@@ -13,7 +13,7 @@ app = Flask(__name__)
 allowed_origins = [
     "http://127.0.0.1:5500",
     "http://localhost:5500",
-    "https://coxx.netlify.app"
+    "https://coxx.netlify.app" # YOUR_NETLIFY_APP_NAME.netlify.app
 ]
 CORS(app, resources={r"/check-id/*": {"origins": allowed_origins}}, supports_credentials=True)
 
@@ -77,17 +77,24 @@ NUVERSE_ROX_HEADERS = {
     "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin",
 }
 
-# --- Gamepoint.club Metal Slug: Awakening Config ---
-GAMEPOINT_MSA_VALIDATE_URL = "https://gamepoint.club/product2.aspx/ValidateUserAsync"
-GAMEPOINT_MSA_PRODUCT_ID = "147" # Static Product ID for MSA on Gamepoint
-GAMEPOINT_MSA_HEADERS = {
+# --- EliteDias Metal Slug: Awakening Config (NEW) ---
+ELITEDIAS_MSA_VALIDATE_URL = "https://api.elitedias.com/checkid"
+ELITEDIAS_MSA_GAME_ID = "metal_slug"
+ELITEDIAS_MSA_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json; charset=utf-8",
-    "Origin": "https://gamepoint.club",
-    "Referer": "https://gamepoint.club/metal-slug-ruby", # Or your specific product page on gamepoint
+    "Origin": "https://elitedias.com",
+    "Referer": "https://elitedias.com/",
     "X-Requested-With": "XMLHttpRequest",
-    "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site"
+}
+MSA_SERVER_ID_TO_NAME_MAP = {
+    "49": "MSA SEA Server 49", # Example based on your previous logs
+    # Add other known VNG server IDs for MSA and their friendly names
+    # "VNG_SERVER_ID": "User Friendly Name"
 }
 
 # --- API Check Functions ---
@@ -330,8 +337,8 @@ def check_nuverse_rox_api(role_id):
                 username = role_info.get("role_name")
                 server_name = role_info.get("server_name")
                 if username and username.strip():
-                    return {"status": "success", "username": username.strip(), "server_name": server_name}
-                return {"status": "success", "message": "Role ID Verified (Username not available)", "server_name": server_name}
+                    return {"status": "success", "username": username.strip(), "server_name_from_api": server_name}
+                return {"status": "success", "message": "Role ID Verified (Username not available)", "server_name_from_api": server_name}
             return {"status": "error", "message": "Role ID not found or invalid (No data)"}
         else:
             error_message = data.get("message", "Unknown error from Nuverse API")
@@ -350,69 +357,58 @@ def check_nuverse_rox_api(role_id):
         logging.exception(f"Unexpected error during Nuverse ROX API call: {e_unexp}")
         return {"status": "error", "message": "Unexpected server error (Nuverse ROX)"}
 
-# --- Gamepoint MSA API Check Function (Simplified for existence check) ---
-def check_gamepoint_msa_api(role_id_from_frontend, server_id_from_frontend=None): # server_id_from_frontend is now optional
-    """
-    Attempts to validate Metal Slug: Awakening Role ID via Gamepoint.club API.
-    Sends PInput02 as empty if server_id_from_frontend is None or empty.
-    """
-    api_server_id_for_payload = "" # Default to empty for PInput02
-    if server_id_from_frontend:
-        # If you still want to map or use it, do it here.
-        # For just existence check with PInput02 potentially empty, this can be simple.
-        api_server_id_for_payload = str(server_id_from_frontend)
 
-
+# --- EliteDias MSA API Check Function (UPDATED to use new endpoint and logic) ---
+def check_elitedias_msa_api(role_id):
+    """
+    Validates Metal Slug: Awakening Role ID via api.elitedias.com API.
+    Server ID is not sent in the request to this API.
+    """
     payload = {
-        "PProductIDN": GAMEPOINT_MSA_PRODUCT_ID,
-        "PInput01": str(role_id_from_frontend),
-        "PInput02": api_server_id_for_payload, # Send selected server or empty
-        "PInput03": ""
+        "game": ELITEDIAS_MSA_GAME_ID, # "metal_slug"
+        "userid": str(role_id)         # This is the Role ID
     }
-    logging.info(f"Sending Gamepoint MSA: URL='{GAMEPOINT_MSA_VALIDATE_URL}', Payload='{json.dumps(payload)}'") # Log full payload
+    logging.info(f"Sending EliteDias MSA: URL='{ELITEDIAS_MSA_VALIDATE_URL}', Payload='{json.dumps(payload)}'")
     raw_text = ""
     try:
-        response = requests.post(GAMEPOINT_MSA_VALIDATE_URL, json=payload, headers=GAMEPOINT_MSA_HEADERS, timeout=10)
+        response = requests.post(ELITEDIAS_MSA_VALIDATE_URL, json=payload, headers=ELITEDIAS_MSA_HEADERS, timeout=12)
         raw_text = response.text
-        logging.info(f"Gamepoint MSA Raw Response (RoleID:{role_id_from_frontend}, ServerSent:{api_server_id_for_payload}): {raw_text}")
+        logging.info(f"EliteDias MSA Raw Response (RoleID:{role_id}): {raw_text}")
         data = response.json()
-        logging.info(f"Gamepoint MSA Parsed JSON: {data}")
+        logging.info(f"EliteDias MSA Parsed JSON: {data}")
 
-        if response.status_code == 200 and data and "d" in data:
-            d_response = data["d"]
-            # Check for successful validation based on API's success indicators
-            if d_response.get("Status") == 5 and d_response.get("IsCompleted") is True and d_response.get("Exception") is None:
-                validated_role_id = d_response.get("Result")
-                if str(validated_role_id) == str(role_id_from_frontend):
-                    # Since username/server name isn't directly in *this* response, return generic success.
-                    return {"status": "success", "message": "Role ID Verified.", "username": None} # Username is not returned by this API
-                else:
-                    logging.warning(f"Gamepoint MSA: Role ID mismatch. Input: {role_id_from_frontend}, API Result: {validated_role_id}")
-                    return {"status": "error", "message": "Unverified, please check your ID."} # Role ID mismatch
+        if response.status_code == 200 and data.get("valid") == "valid":
+            username = data.get("username") or data.get("nickname") or data.get("name")
+            api_server_id = data.get("serverid") # This is VNG's serverID like "49"
+            
+            # Use the map to get a friendly server name, or fallback
+            server_name_display = MSA_SERVER_ID_TO_NAME_MAP.get(str(api_server_id), f"Server {api_server_id}")
+
+            if username and username.strip():
+                return {"status": "success", "username": username.strip(), "server_name_from_api": server_name_display}
             else:
-                # Handle cases where 'Status' is not 5 or there's an exception or IsCompleted is false
-                error_msg = d_response.get("Result") if isinstance(d_response.get("Result"), str) else "Unverified, please check your ID."
-                if d_response.get("Exception"):
-                    error_msg = f"API Error: {d_response.get('Exception')}"
-                logging.warning(f"Gamepoint MSA: Validation failed. API Response 'd': {d_response}")
-                return {"status": "error", "message": error_msg}
+                # If valid but no username, still success, provide server context
+                return {"status": "success", "message": "Role ID Verified.", "username": None, "server_name_from_api": server_name_display}
         else:
-            logging.warning(f"Gamepoint MSA: API request failed. HTTP Status: {response.status_code}, Raw: {raw_text[:500]}")
-            return {"status": "error", "message": "Verification service unavailable."}
+            # Handle cases where 'valid' is not "valid" or other API errors
+            error_message = data.get("message", "Unverified, please check your ID (EliteDias).")
+            if data.get("valid") != "valid" and not data.get("message"):
+                 error_message = "Invalid Role ID (EliteDias)."
+            logging.warning(f"EliteDias MSA: Validation failed. API Response: {data}")
+            return {"status": "error", "message": error_message}
 
-    except ValueError:
-        logging.error(f"JSON Parse Error (Gamepoint MSA). Raw: {raw_text}")
-        return {"status": "error", "message": "Invalid response from verification service."}
+    except ValueError: # JSONDecodeError
+        logging.error(f"JSON Parse Error (EliteDias MSA). Raw: {raw_text}")
+        return {"status": "error", "message": "Invalid response from verification service (EliteDias)."}
     except requests.Timeout:
-        logging.warning(f"API Timeout (Gamepoint MSA)")
-        return {"status": "error", "message": "Verification timed out."}
+        logging.warning(f"API Timeout (EliteDias MSA)")
+        return {"status": "error", "message": "Verification timed out (EliteDias)."}
     except requests.RequestException as e:
-        logging.error(f"API Connection Error (Gamepoint MSA): {e}")
-        return {"status": "error", "message": "Could not connect to verification service."}
+        logging.error(f"API Connection Error (EliteDias MSA): {e}")
+        return {"status": "error", "message": "Could not connect to verification service (EliteDias)."}
     except Exception as e_unexp:
-        logging.exception(f"Unexpected error during Gamepoint MSA API call: {e_unexp}")
-        return {"status": "error", "message": "Unexpected error during verification."}
-
+        logging.exception(f"Unexpected error during EliteDias MSA API call: {e_unexp}")
+        return {"status": "error", "message": "Unexpected error during verification (EliteDias)."}
 
 # --- Flask Routes ---
 @app.route('/')
@@ -432,24 +428,19 @@ def check_game_id(game_slug_from_frontend, uid, server_id): # server_id can be N
     if game_lower == "metal-slug-awakening":
         if not uid.isdigit():
             return jsonify({"status": "error", "message": "Numeric Role ID required for Metal Slug: Awakening."}), 400
-        # Server_id is now optional for the API call to Gamepoint. Pass it if provided by frontend.
-        # The API itself might not use PInput02 if it can derive server from RoleID + ProductIDN.
-        result = check_gamepoint_msa_api(uid, server_id) # Pass server_id (which can be None)
-        # Since Gamepoint API doesn't return server name in *this* validation,
-        # we'll use a generic or the frontend-provided server_id for context.
-        intended_region_display = f"Server {server_id}" if server_id else "Metal Slug Server"
-        if result.get("status") == "success" and result.get("message"): # Gamepoint returns message on success
-             result["username"] = None # Ensure username is explicitly null as API doesn't provide it
-                                       # but message like "Role ID Verified." is set.
+        # EliteDias API for MSA does not take server_id in request, it returns it.
+        # So, server_id from frontend is ignored for this specific API call.
+        result = check_elitedias_msa_api(uid)
+        # `intended_region_display` will be built using `server_name_from_api` from the result.
+        intended_region_display = result.get("server_name_from_api", "Metal Slug Server") # Fallback if not returned
 
     elif game_lower == "ragnarok-x-next-generation":
         if not uid.isdigit() or len(uid) < 10:
              return jsonify({"status": "error", "message": "Invalid Role ID format for Ragnarok X."}), 400
-        result = check_nuverse_rox_api(uid) # server_id is not used for Nuverse ROX validation query
+        result = check_nuverse_rox_api(uid)
         intended_region_display = result.get("server_name", "ROX Server") # Use API's server_name if available
-        if result.get("status") == "success" and result.get("server_name"): # Update for display
+        if result.get("status") == "success" and result.get("server_name"):
             intended_region_display = result.get("server_name")
-
 
     elif game_lower == "mobile-legends-sg":
         intended_region_display = "SG"
@@ -511,20 +502,17 @@ def check_game_id(game_slug_from_frontend, uid, server_id): # server_id can be N
         else: status_code_http = 400
 
     final_response_data = {
-        "status": result.get("status"), "username": result.get("username"), # username will be None for gamepoint msa
+        "status": result.get("status"), "username": result.get("username"),
         "message": result.get("message"), "error": result.get("error"),
-        "region_product_context": intended_region_display
+        "region_product_context": intended_region_display # For frontend display context
     }
-    # This was for Nuverse ROX, Gamepoint MSA validation doesn't return server_name directly
-    if result.get("server_name_from_api") and game_lower == "ragnarok-x-next-generation":
+    # This field is specifically for carrying an API-returned server name if available
+    if result.get("server_name_from_api"):
         final_response_data["server_name_from_api"] = result.get("server_name_from_api")
-    elif result.get("server_name_from_api") and game_lower == "metal-slug-awakening": # If Gamepoint ever returns it
-        final_response_data["server_name_from_api"] = result.get("server_name_from_api")
-
 
     final_response_data_cleaned = {k: v for k, v in final_response_data.items() if v is not None}
 
-    logging.info(f"Flask final response for {game_lower} (UID: {uid}, Server: {server_id}): {final_response_data_cleaned}, HTTP Status: {status_code_http}")
+    logging.info(f"Flask final response for {game_lower} (UID: {uid}, ServerParam: {server_id}): {final_response_data_cleaned}, HTTP Status: {status_code_http}")
     return jsonify(final_response_data_cleaned), status_code_http
 
 if __name__ == "__main__":
