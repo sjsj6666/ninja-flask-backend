@@ -1,5 +1,6 @@
 Flask
 Flask-CORS
 requests
-python-dotenv  # Add this line
-gunicorn       # If you are using gunicorn, keep it
+python-dotenv
+gunicorn
+supabase
