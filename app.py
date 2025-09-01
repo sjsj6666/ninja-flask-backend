@@ -54,16 +54,16 @@ RAZER_GOLD_ZZZ_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/custom/cognosp
 RAZER_GOLD_ZZZ_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy(); RAZER_GOLD_ZZZ_HEADERS["Referer"] = "https://gold.razer.com/sg/en/gold/catalog/zenless-zone-zero"
 RAZER_ZZZ_SERVER_ID_MAP = {"prod_official_asia": "prod_gf_jp","prod_official_usa": "prod_gf_us","prod_official_eur": "prod_gf_eu","prod_official_cht": "prod_gf_sg"}
 RAZER_GOLD_RO_ORIGIN_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/custom/gravity-ragnarok-origin/users/{user_id}"
-RAZER_GOLD_RO_ORIGIN_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy(); RAZER_GOLD_RO_ORIGIN_HEADERS["Referer"] = "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin"
+RAZER_GOLD_RO_ORIGIN_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy()
 RAZER_GOLD_SNOWBREAK_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/custom/seasun-games-snowbreak-containment-zone/users/{user_id}"
-RAZER_GOLD_SNOWBREAK_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy(); RAZER_GOLD_SNOWBREAK_HEADERS["Referer"] = "https://gold.razer.com/my/en/gold/catalog/snowbreak-containment-zone"
+RAZER_GOLD_SNOWBREAK_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy()
 RAZER_SNOWBREAK_SERVER_ID_MAP = {"sea": "215","asia": "225","americas": "235","europe": "245"}
 NUVERSE_ROX_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
 NUVERSE_ROX_AID = "3402"
-NUVERSE_ROX_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", "Accept": "*/*", "Referer": f"https://pay.nvsgames.com/topup/{NUVERSE_ROX_AID}/sg-en", "x-appid": NUVERSE_ROX_AID, "x-language": "en", "x-scene": "0", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"}
+NUVERSE_ROX_HEADERS = {"User-Agent": "Mozilla/5.0"}
 ELITEDIAS_MSA_VALIDATE_URL = "https://api.elitedias.com/checkid"
 ELITEDIAS_MSA_GAME_ID = "metal_slug"
-ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Content-Type": "application/json; charset=utf-8", "Origin": "https://elitedias.com", "Referer": "https://elitedias.com/", "X-Requested-With": "XMLHttpRequest", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-site"}
+ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8"}
 MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 
 
@@ -72,154 +72,88 @@ MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 def home():
     return "NinjaTopUp Validation & Services Backend is Live!"
 
+
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
     try:
         response = supabase.table('site_settings').select('setting_value').eq('setting_key', 'exchangerate_api_key').single().execute()
         api_key_data = response.data
         if not api_key_data or not api_key_data.get('setting_value'):
-            logging.error("ExchangeRate-API key is missing or not set in the database.")
-            return jsonify({"error": "Currency service API key is not configured in the admin panel."}), 500
+            return jsonify({"error": "Currency service API key missing."}), 500
         
         API_KEY = api_key_data['setting_value']
         url = f"https://v6.exchangerate-api.com/v6/{API_KEY}/latest/SGD"
-        
         api_response = requests.get(url, timeout=10)
         api_response.raise_for_status()
         data = api_response.json()
-        
         if data.get('result') == 'success':
             return jsonify(data.get('conversion_rates', {}))
-        else:
-            api_error_type = data.get('error-type', 'Unknown API error')
-            logging.error(f"ExchangeRate-API returned an error: {api_error_type}")
-            return jsonify({"error": api_error_type}), 400
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Could not connect to ExchangeRate-API: {e}")
-        return jsonify({"error": "Could not connect to the currency service."}), 503
+        return jsonify({"error": data.get('error-type', 'Unknown API error')}), 400
     except Exception as e:
-        logging.exception(f"An unexpected error occurred in get_rates: {e}")
-        return jsonify({"error": "An internal server error occurred."}), 500
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/generate-paynow-qr', methods=['GET'])
 def generate_paynow_qr():
     PAYNOW_UEN = os.environ.get("PAYNOW_UEN") 
     PAYNOW_MERCHANT_NAME = os.environ.get("PAYNOW_MERCHANT_NAME", "NinjaTopUp")
-    
-    if not PAYNOW_UEN:
-        logging.error("PAYNOW_UEN is not set in environment variables.")
-        return jsonify({"error": "Payment configuration is missing on the server."}), 500
-
     amount = request.args.get('amount')
     reference = request.args.get('ref')
 
-    # More robust validation
-    if not reference or not reference.strip() or len(reference.strip()) > 25:
-        return jsonify({"error": "A valid reference (1-25 chars) is required."}), 400
-    
+    if not PAYNOW_UEN:
+        logging.error("PayNow UEN is not set in environment variables.")
+        return jsonify({"error": "Server payment configuration is missing."}), 500
+    if not reference or not (1 <= len(reference.strip()) <= 25):
+        return jsonify({"error": "A valid payment reference (1-25 chars) is required."}), 400
     try:
-        amount_float = float(amount)
-        if amount_float <= 0:
-            return jsonify({"error": "Amount must be positive."}), 400
-        amount_formatted = f"{amount_float:.2f}"
+        amount_val = float(amount)
+        if amount_val <= 0:
+            return jsonify({"error": "Payment amount must be a positive number."}), 400
+        amount_fmt = f"{amount_val:.2f}"
     except (ValueError, TypeError):
-        return jsonify({"error": "A valid numeric amount is required."}), 400
+        return jsonify({"error": "A valid payment amount is required."}), 400
 
     try:
-        # Build PayNow payload according to official specification
-        # Merchant Account Information (ID 26)
-        merchant_info = {
-            '00': 'sg.com.paynow',  # GUID
-            '01': '2',  # Proxy Type (2 = UEN)
-            '02': PAYNOW_UEN,  # Proxy Value (UEN)
-            '03': '0'  # Editable amount (0 = not editable)
-        }
-        
-        # Build merchant info string
-        merchant_info_str = ""
-        for key in sorted(merchant_info.keys()):
-            value = merchant_info[key]
-            merchant_info_str += f"{key}{len(value):02d}{value}"
-        
-        # Additional Data (ID 62)
-        additional_data = {
-            '01': reference.strip()  # Reference number
-        }
-        additional_data_str = ""
-        for key in sorted(additional_data.keys()):
-            value = additional_data[key]
-            additional_data_str += f"{key}{len(value):02d}{value}"
-        
-        # Main payload parts
+        # Build the compliant SGQR Payload
         payload_parts = {
-            '00': '01',  # Payload Format Indicator
-            '01': '11',  # Point of Initiation Method (11 = static, 12 = dynamic)
-            '26': merchant_info_str,  # Merchant Account Information
-            '52': '0000',  # Merchant Category Code
-            '53': '702',  # Transaction Currency (SGD)
-            '54': amount_formatted,  # Transaction Amount
-            '58': 'SG',  # Country Code
-            '59': PAYNOW_MERCHANT_NAME[:25],  # Merchant Name (max 25 chars)
-            '60': 'Singapore',  # Merchant City
-            '62': additional_data_str  # Additional Data Field
+            '00': '01', '01': '12',
+            '26': {'00': 'sg.com.paynow', '01': '2', '02': PAYNOW_UEN, '03': '1'},
+            '52': '0000', '53': '702', '54': amount_fmt, '58': 'SG', 
+            '59': PAYNOW_MERCHANT_NAME[:25],
+            '62': {'01': reference}
         }
+        def build_payload(parts):
+            result = ""
+            for tag in sorted(parts.keys()):
+                value = parts[tag]
+                if isinstance(value, dict):
+                    sub_payload = build_payload(value)
+                    result += f"{tag}{len(sub_payload):02d}{sub_payload}"
+                else:
+                    result += f"{tag}{len(value):02d}{value}"
+            return result
         
-        # Build payload string
-        payload_string = ""
-        for key in sorted(payload_parts.keys()):
-            value = payload_parts[key]
-            payload_string += f"{key}{len(value):02d}{value}"
+        payload_string = build_payload(payload_parts)
         
-        # Calculate CRC16 checksum
-        payload_with_crc = payload_string + '6304'
+        # Calculate and append the CRC checksum
+        payload_with_crc_placeholder = payload_string + '6304'
         crc16_func = crcmod.predefined.mkCrcFun('crc-ccitt-false')
-        checksum = crc16_func(payload_with_crc.encode('utf-8'))
+        checksum = crc16_func(payload_with_crc_placeholder.encode('utf-8'))
         checksum_hex = f'{checksum:04X}'
-        
-        final_payload = payload_with_crc + checksum_hex
-        
-        logging.info(f"Generated PayNow payload: {final_payload}")
-        
-        # Generate QR code
-        buffer = io.BytesIO()
-        qrcode = segno.make_qr(final_payload, error='M')  # Medium error correction
-        qrcode.save(buffer, kind='png', scale=10, border=4, dark='#000000', light='#ffffff')
-        buffer.seek(0)
-        
-        return send_file(buffer, mimetype='image/png', as_attachment=False)
-        
-    except Exception as e:
-        logging.error(f"Failed to generate PayNow QR code: {e}")
-        return jsonify({"error": "Failed to generate QR code. Please try again."}), 500
+        final_payload = payload_with_crc_placeholder + checksum_hex
 
-# Alternative: Free third-party QR code generation as fallback
-@app.route('/generate-paynow-qr-fallback', methods=['GET'])
-def generate_paynow_qr_fallback():
-    try:
-        PAYNOW_UEN = os.environ.get("PAYNOW_UEN") 
-        amount = request.args.get('amount')
-        reference = request.args.get('ref')
+        # Generate QR code image in memory
+        buf = io.BytesIO()
+        qr = segno.make_qr(final_payload, error='M')
+        qr.save(buf, kind='png', scale=10, border=4)
+        buf.seek(0)
         
-        # Create PayNow deep link URL
-        paynow_url = f"paynow://{PAYNOW_UEN}?amount={amount}&reference={reference}"
+        return send_file(buf, mimetype='image/png')
         
-        # Use free QR code generation service
-        qr_generator_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={quote(paynow_url)}"
-        
-        response = requests.get(qr_generator_url, timeout=10)
-        if response.status_code == 200:
-            buffer = io.BytesIO(response.content)
-            buffer.seek(0)
-            return send_file(buffer, mimetype='image/png', as_attachment=False)
-        else:
-            # Fallback to local generation if API fails
-            return generate_paynow_qr()
-            
     except Exception as e:
-        logging.error(f"PayNow QR fallback error: {e}")
-        # Final fallback to main function
-        return generate_paynow_qr()
+        logging.error(f"PayNow QR code generation failed: {e}")
+        return jsonify({"error": "An internal error occurred while generating the QR code."}), 500
+
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
