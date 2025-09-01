@@ -2,6 +2,6 @@
 Flask
 Flask-Cors
 requests
-supabase-py
+supabase
 gunicorn
 segno[pil]  
