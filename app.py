@@ -121,7 +121,7 @@ def generate_paynow_qr():
 
     payload_parts = {
         '00': '01', '01': '12',
-        '26': {'00': 'sg.com.paynow', '01': '2', '02': PAYNOW_UEN, '03': '1'},
+        '26': {'00': 'sg.com.paynow', '01': '2', '02': PAYNOW_UEN},
         '52': '0000', '53': '702', '54': amount, '58': 'SG', '59': PAYNOW_MERCHANT_NAME,
         '62': {'01': reference}
     }
