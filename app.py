@@ -101,6 +101,8 @@ def get_rates():
         logging.exception(f"An unexpected error occurred in get_rates: {e}")
         return jsonify({"error": "An internal server error occurred."}), 500
 
+# app.py (The complete, corrected function)
+
 @app.route('/generate-paynow-qr', methods=['GET'])
 def generate_paynow_qr():
     PAYNOW_UEN = os.environ.get("PAYNOW_UEN") 
@@ -138,10 +140,9 @@ def generate_paynow_qr():
     
     payload_string = build_payload(payload_parts)
     
-    crc_calculator = Calculator(CCITT_FALSE)
-    
+    # --- THIS IS THE CORRECTED CRC CALCULATION ---
     payload_with_crc_placeholder = payload_string + '6304'
-    checksum = crc_calculator.checksum(payload_with_crc_placeholder.encode('utf-8'))
+    checksum = crc.crc16.arc(payload_with_crc_placeholder.encode('utf-8'))
     checksum_hex = f'{checksum:04X}'
     final_payload = payload_with_crc_placeholder + checksum_hex
     
