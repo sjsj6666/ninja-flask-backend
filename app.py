@@ -105,6 +105,7 @@ def get_rates():
 def generate_paynow_qr():
     PAYNOW_UEN = os.environ.get("PAYNOW_UEN") 
     PAYNOW_MERCHANT_NAME = os.environ.get("PAYNOW_MERCHANT_NAME", "NinjaTopUp")
+    
     if not PAYNOW_UEN:
         logging.error("PAYNOW_UEN is not set in environment variables.")
         return jsonify({"error": "Payment configuration is missing on the server."}), 500
@@ -112,7 +113,7 @@ def generate_paynow_qr():
     amount = request.args.get('amount')
     reference = request.args.get('ref')
 
-    # More robust validation
+    # Validation
     if not reference or not reference.strip() or len(reference.strip()) > 25:
         return jsonify({"error": "A valid reference (1-25 chars) is required."}), 400
     
@@ -120,44 +121,65 @@ def generate_paynow_qr():
         amount_float = float(amount)
         if amount_float <= 0:
             return jsonify({"error": "Amount must be positive."}), 400
-        amount = f"{amount_float:.2f}"
+        amount_formatted = f"{amount_float:.2f}"
     except (ValueError, TypeError):
         return jsonify({"error": "A valid numeric amount is required."}), 400
 
-    payload_parts = {
-        '00': '01', '01': '12',
-        '26': {'00': 'sg.com.paynow', '01': '2', '02': PAYNOW_UEN},
-        '52': '0000', '53': '702', '54': amount, '58': 'SG', '59': PAYNOW_MERCHANT_NAME,
-        '62': {'01': reference}
-    }
-    def build_payload(parts):
-        result = ""
-        for tag in sorted(parts.keys()):
-            value = parts[tag]
-            if isinstance(value, dict):
-                sub_payload = build_payload(value)
-                result += f"{tag}{len(sub_payload):02d}{sub_payload}"
-            else:
-                result += f"{tag}{len(value):02d}{value}"
-        return result
-    
-    payload_string = build_payload(payload_parts)
-    
-    payload_with_crc_placeholder = payload_string + '6304'
-    crc16_func = crcmod.predefined.mkCrcFun('crc-ccitt-false')
-    checksum = crc16_func(payload_with_crc_placeholder.encode('utf-8'))
-    checksum_hex = f'{checksum:04X}'
-    final_payload = payload_with_crc_placeholder + checksum_hex
-    
+    # Build PayNow payload according to official specification
     try:
+        # Merchant Account Information (ID 26)
+        merchant_info = {
+            '00': 'sg.com.paynow',  # GUID
+            '01': '2',  # Proxy Type (2 = UEN)
+            '02': PAYNOW_UEN,  # Proxy Value (UEN)
+            '03': '0'  # Editable amount (0 = not editable)
+        }
+        merchant_info_str = ''.join([f"{k}{len(str(v)):02d}{v}" for k, v in merchant_info.items()])
+        
+        # Additional Data (ID 62)
+        additional_data = {
+            '01': reference.strip()  # Reference number
+        }
+        additional_data_str = ''.join([f"{k}{len(str(v)):02d}{v}" for k, v in additional_data.items()])
+        
+        # Main payload
+        payload_parts = {
+            '00': '01',  # Payload Format Indicator
+            '01': '11',  # Point of Initiation Method (11 = static, 12 = dynamic)
+            '26': merchant_info_str,  # Merchant Account Information
+            '52': '0000',  # Merchant Category Code
+            '53': '702',  # Transaction Currency (SGD)
+            '54': amount_formatted,  # Transaction Amount
+            '58': 'SG',  # Country Code
+            '59': PAYNOW_MERCHANT_NAME[:25],  # Merchant Name (max 25 chars)
+            '60': 'Singapore',  # Merchant City
+            '62': additional_data_str  # Additional Data Field
+        }
+        
+        # Build payload string
+        payload_string = ''.join([f"{k}{len(str(v)):02d}{v}" for k, v in payload_parts.items()])
+        
+        # Calculate CRC16 checksum
+        payload_with_crc = payload_string + '6304'
+        crc16_func = crcmod.predefined.mkCrcFun('crc-ccitt-false')
+        checksum = crc16_func(payload_with_crc.encode('utf-8'))
+        checksum_hex = f'{checksum:04X}'
+        
+        final_payload = payload_with_crc + checksum_hex
+        
+        logging.info(f"Generated PayNow payload: {final_payload}")
+        
+        # Generate QR code
         buffer = io.BytesIO()
-        qrcode = segno.make_qr(final_payload, error='h')
-        qrcode.save(buffer, kind='png', scale=8, border=2)
+        qrcode = segno.make_qr(final_payload, error='M')  # Medium error correction
+        qrcode.save(buffer, kind='png', scale=10, border=4, dark='#000000', light='#ffffff')
         buffer.seek(0)
+        
         return send_file(buffer, mimetype='image/png', as_attachment=False)
+        
     except Exception as e:
-        logging.error(f"Failed to generate QR code: {e}")
-        return jsonify({"error": "Failed to generate QR code image."}), 500
+        logging.error(f"Failed to generate PayNow QR code: {e}")
+        return jsonify({"error": "Failed to generate QR code. Please try again."}), 500
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
