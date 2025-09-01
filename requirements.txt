@@ -4,4 +4,5 @@ Flask-Cors
 requests
 supabase
 gunicorn
-segno[pil]  
+segno[pil]
+crc # <--- ADD THIS LINE
