@@ -1,4 +1,4 @@
-# app.py (Final, Complete, and Unabridged Version)
+# app.py (Final, Complete, Unabridged, and Corrected Version)
 
 import os
 import logging
@@ -8,11 +8,10 @@ import json
 import io
 import segno
 import requests
+import crc # The correct import for the crc library
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
-from crc import Calculator
-from crc.crc16 import CCITT_FALSE
 
 app = Flask(__name__)
 
@@ -66,6 +65,7 @@ ELITEDIAS_MSA_GAME_ID = "metal_slug"
 ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Content-Type": "application/json; charset=utf-8", "Origin": "https://elitedias.com", "Referer": "https://elitedias.com/", "X-Requested-With": "XMLHttpRequest", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-site"}
 MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 
+
 # --- FLASK ROUTES ---
 @app.route('/')
 def home():
@@ -100,8 +100,6 @@ def get_rates():
     except Exception as e:
         logging.exception(f"An unexpected error occurred in get_rates: {e}")
         return jsonify({"error": "An internal server error occurred."}), 500
-
-# app.py (The complete, corrected function)
 
 @app.route('/generate-paynow-qr', methods=['GET'])
 def generate_paynow_qr():
@@ -140,7 +138,6 @@ def generate_paynow_qr():
     
     payload_string = build_payload(payload_parts)
     
-    # --- THIS IS THE CORRECTED CRC CALCULATION ---
     payload_with_crc_placeholder = payload_string + '6304'
     checksum = crc.crc16.arc(payload_with_crc_placeholder.encode('utf-8'))
     checksum_hex = f'{checksum:04X}'
@@ -177,6 +174,7 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
+
 
 # --- API CHECK FUNCTIONS ---
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
