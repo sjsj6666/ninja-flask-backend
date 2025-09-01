@@ -8,7 +8,7 @@ import json
 import io
 import segno
 import requests
-import crc # The correct import for the crc library
+import crcmod.predefined
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -139,7 +139,8 @@ def generate_paynow_qr():
     payload_string = build_payload(payload_parts)
     
     payload_with_crc_placeholder = payload_string + '6304'
-    checksum = crc.crc16.arc(payload_with_crc_placeholder.encode('utf-8'))
+    crc16_func = crcmod.predefined.mkCrcFun('crc-ccitt-false')
+    checksum = crc16_func(payload_with_crc_placeholder.encode('utf-8'))
     checksum_hex = f'{checksum:04X}'
     final_payload = payload_with_crc_placeholder + checksum_hex
     
