@@ -112,12 +112,17 @@ def generate_paynow_qr():
     amount = request.args.get('amount')
     reference = request.args.get('ref')
 
-    if not reference or len(reference) > 25:
-        return jsonify({"error": "A valid reference (max 25 chars) is required."}), 400
+    # More robust validation
+    if not reference or not reference.strip() or len(reference.strip()) > 25:
+        return jsonify({"error": "A valid reference (1-25 chars) is required."}), 400
+    
     try:
-        amount = f"{float(amount):.2f}"
+        amount_float = float(amount)
+        if amount_float <= 0:
+            return jsonify({"error": "Amount must be positive."}), 400
+        amount = f"{amount_float:.2f}"
     except (ValueError, TypeError):
-        return jsonify({"error": "A valid amount is required."}), 400
+        return jsonify({"error": "A valid numeric amount is required."}), 400
 
     payload_parts = {
         '00': '01', '01': '12',
