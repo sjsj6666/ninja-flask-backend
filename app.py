@@ -120,6 +120,7 @@ def generate_paynow_qr():
             '26': {'00': 'sg.com.paynow', '01': '2', '02': PAYNOW_UEN, '03': '1'},
             '52': '0000', '53': '702', '54': amount_fmt, '58': 'SG', 
             '59': PAYNOW_MERCHANT_NAME[:25],
+            '60': 'Singapore',
             '62': {'01': reference}
         }
         def build_payload(parts):
