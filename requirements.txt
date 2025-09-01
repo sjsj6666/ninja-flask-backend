@@ -1,8 +1,7 @@
-# requirements.txt
 Flask
 Flask-Cors
 requests
 supabase
 gunicorn
 segno[pil]
-crc # <--- ADD THIS LINE
+crcmod
