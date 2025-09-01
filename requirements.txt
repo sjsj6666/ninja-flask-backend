@@ -1,6 +1,7 @@
+# requirements.txt
 Flask
-Flask-CORS
+Flask-Cors
 requests
-python-dotenv
+supabase-py
 gunicorn
-supabase
+segno[pil]  
