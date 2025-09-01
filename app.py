@@ -1,13 +1,15 @@
 # app.py
 
-from flask import Flask, jsonify
-from flask_cors import CORS
-import requests
 import os
 import logging
 import time
 import uuid
 import json
+import io
+import segno
+import requests
+from flask import Flask, jsonify, request, send_file
+from flask_cors import CORS
 from supabase import create_client, Client
 
 app = Flask(__name__)
@@ -24,9 +26,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 port = int(os.environ.get("PORT", 5001))
 
 # --- SUPABASE CLIENT INITIALIZATION (for the backend) ---
-SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://mcbrtveqcprdvnmqscze.supabase.co')
-SUPABASE_KEY = os.environ.get('SUPABASE_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jYnJ0dmVxY3ByZHZubXFzY3plIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDIxNDMyMzgsImV4cCI6MjA1NzcxOTIzOH0.byNV0MNwbcLzP6pM6hqf1SPg9eYs-RLkTRpS5I--DHU')
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_URL = os.environ.get('SUPABASE_URL')
+SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
+if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+    raise ValueError("CRITICAL: SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in environment variables.")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 # --- API HEADERS & CONSTANTS ---
 SMILE_ONE_HEADERS = {
@@ -35,7 +39,7 @@ SMILE_ONE_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "Origin": "https://www.smile.one",
     "X-Requested-With": "XMLHttpRequest",
-    "Cookie": os.environ.get("SMILE_ONE_COOKIE", "YOUR_SMILE_ONE_COOKIE_PLACEHOLDER_IF_ANY")
+    "Cookie": os.environ.get("SMILE_ONE_COOKIE")
 }
 NETEASE_IDV_BASE_URL_TEMPLATE = "https://pay.neteasegames.com/gameclub/identityv/{server_code}/login-role"
 NETEASE_IDV_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Referer": "https://pay.neteasegames.com/identityv/topup", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"}
@@ -60,13 +64,14 @@ ELITEDIAS_MSA_GAME_ID = "metal_slug"
 ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Content-Type": "application/json; charset=utf-8", "Origin": "https://elitedias.com", "Referer": "https://elitedias.com/", "X-Requested-With": "XMLHttpRequest", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-site"}
 MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 
+
 # --- CURRENCY EXCHANGE RATE ROUTE ---
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
     try:
         response = supabase.table('site_settings').select('setting_value').eq('setting_key', 'exchangerate_api_key').single().execute()
         api_key_data = response.data
-        if not api_key_data or not api_key_data.get('setting_value') or 'YOUR_API_KEY' in api_key_data.get('setting_value'):
+        if not api_key_data or not api_key_data.get('setting_value'):
             logging.error("ExchangeRate-API key is missing or not set in the database.")
             return jsonify({"error": "Currency service API key is not configured in the admin panel."}), 500
         
@@ -90,6 +95,54 @@ def get_rates():
     except Exception as e:
         logging.exception("An unexpected error occurred in get_rates")
         return jsonify({"error": f"An internal server error occurred: {e}"}), 500
+
+
+# --- DYNAMIC PAYNOW QR CODE GENERATION ROUTE ---
+@app.route('/generate-paynow-qr', methods=['GET'])
+def generate_paynow_qr():
+    PAYNOW_UEN = os.environ.get("PAYNOW_UEN")
+    PAYNOW_MERCHANT_NAME = os.environ.get("PAYNOW_MERCHANT_NAME", "NinjaTopUp")
+    if not PAYNOW_UEN:
+        logging.error("PAYNOW_UEN is not set in environment variables.")
+        return jsonify({"error": "Payment configuration is missing on the server."}), 500
+
+    amount = request.args.get('amount')
+    reference = request.args.get('ref')
+
+    if not reference:
+        return jsonify({"error": "A reference number is required."}), 400
+    try:
+        amount = f"{float(amount):.2f}"
+    except (ValueError, TypeError):
+        return jsonify({"error": "A valid amount is required."}), 400
+
+    payload_parts = {
+        '00': '01', '01': '12',
+        '26': {'00': 'sg.com.paynow', '01': '2', '02': PAYNOW_UEN, '03': '1'},
+        '52': '0000', '53': '702', '54': amount, '58': 'SG', '59': PAYNOW_MERCHANT_NAME,
+        '62': {'01': reference}
+    }
+    def build_payload(parts):
+        result = ""
+        for tag, value in sorted(parts.items()):
+            if isinstance(value, dict):
+                sub_payload = build_payload(value)
+                result += f"{tag}{len(sub_payload):02d}{sub_payload}"
+            else:
+                result += f"{tag}{len(value):02d}{value}"
+        return result
+    payload_string = build_payload(payload_parts)
+    
+    try:
+        buffer = io.BytesIO()
+        qrcode = segno.make_qr(payload_string)
+        qrcode.save(buffer, kind='png', scale=6, border=2)
+        buffer.seek(0)
+        return send_file(buffer, mimetype='image/png', as_attachment=False)
+    except Exception as e:
+        logging.error(f"Failed to generate QR code: {e}")
+        return jsonify({"error": "Failed to generate QR code image."}), 500
+
 
 # --- API CHECK FUNCTIONS ---
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
@@ -147,7 +200,7 @@ def check_identityv_api(server_frontend_key, roleid):
     server_code = IDV_SERVER_CODES.get(server_frontend_key.lower())
     if not server_code: return {"status": "error", "message": "Invalid server for Identity V."}
     url = NETEASE_IDV_BASE_URL_TEMPLATE.format(server_code=server_code)
-    params = {"roleid": roleid, "timestamp": int(time.time() * 1000), "traceid": str(uuid.uuid4()), "deviceid": os.environ.get("NETEASE_DEVICE_ID", "YOUR_FALLBACK_NETEASE_DEVICE_ID_HERE"), **NETEASE_IDV_STATIC_PARAMS}
+    params = {"roleid": roleid, "timestamp": int(time.time() * 1000), "traceid": str(uuid.uuid4()), "deviceid": os.environ.get("NETEASE_DEVICE_ID"), **NETEASE_IDV_STATIC_PARAMS}
     current_headers = NETEASE_IDV_HEADERS.copy(); current_headers["X-TASK-ID"] = f"transid={params['traceid']},uni_transaction_id=default"
     logging.info(f"Sending Netease IDV: URL='{url}', Params={params}")
     raw_text = ""
@@ -229,6 +282,7 @@ def check_elitedias_msa_api(role_id):
         error_message = data.get("message", "Invalid Role ID (EliteDias).")
         return {"status": "error", "message": error_message}
     except Exception as e: logging.error(f"Error in EliteDias MSA API call: {e}"); return {"status": "error", "message": "API Error (EliteDias)"}
+
 
 # --- FLASK ROUTES ---
 @app.route('/')
