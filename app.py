@@ -12,6 +12,7 @@ import crcmod.predefined
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
+from urllib.parse import quote
 
 app = Flask(__name__)
 
@@ -113,7 +114,7 @@ def generate_paynow_qr():
     amount = request.args.get('amount')
     reference = request.args.get('ref')
 
-    # Validation
+    # More robust validation
     if not reference or not reference.strip() or len(reference.strip()) > 25:
         return jsonify({"error": "A valid reference (1-25 chars) is required."}), 400
     
@@ -125,8 +126,8 @@ def generate_paynow_qr():
     except (ValueError, TypeError):
         return jsonify({"error": "A valid numeric amount is required."}), 400
 
-    # Build PayNow payload according to official specification
     try:
+        # Build PayNow payload according to official specification
         # Merchant Account Information (ID 26)
         merchant_info = {
             '00': 'sg.com.paynow',  # GUID
@@ -134,15 +135,23 @@ def generate_paynow_qr():
             '02': PAYNOW_UEN,  # Proxy Value (UEN)
             '03': '0'  # Editable amount (0 = not editable)
         }
-        merchant_info_str = ''.join([f"{k}{len(str(v)):02d}{v}" for k, v in merchant_info.items()])
+        
+        # Build merchant info string
+        merchant_info_str = ""
+        for key in sorted(merchant_info.keys()):
+            value = merchant_info[key]
+            merchant_info_str += f"{key}{len(value):02d}{value}"
         
         # Additional Data (ID 62)
         additional_data = {
             '01': reference.strip()  # Reference number
         }
-        additional_data_str = ''.join([f"{k}{len(str(v)):02d}{v}" for k, v in additional_data.items()])
+        additional_data_str = ""
+        for key in sorted(additional_data.keys()):
+            value = additional_data[key]
+            additional_data_str += f"{key}{len(value):02d}{value}"
         
-        # Main payload
+        # Main payload parts
         payload_parts = {
             '00': '01',  # Payload Format Indicator
             '01': '11',  # Point of Initiation Method (11 = static, 12 = dynamic)
@@ -157,7 +166,10 @@ def generate_paynow_qr():
         }
         
         # Build payload string
-        payload_string = ''.join([f"{k}{len(str(v)):02d}{v}" for k, v in payload_parts.items()])
+        payload_string = ""
+        for key in sorted(payload_parts.keys()):
+            value = payload_parts[key]
+            payload_string += f"{key}{len(value):02d}{value}"
         
         # Calculate CRC16 checksum
         payload_with_crc = payload_string + '6304'
@@ -180,6 +192,34 @@ def generate_paynow_qr():
     except Exception as e:
         logging.error(f"Failed to generate PayNow QR code: {e}")
         return jsonify({"error": "Failed to generate QR code. Please try again."}), 500
+
+# Alternative: Free third-party QR code generation as fallback
+@app.route('/generate-paynow-qr-fallback', methods=['GET'])
+def generate_paynow_qr_fallback():
+    try:
+        PAYNOW_UEN = os.environ.get("PAYNOW_UEN") 
+        amount = request.args.get('amount')
+        reference = request.args.get('ref')
+        
+        # Create PayNow deep link URL
+        paynow_url = f"paynow://{PAYNOW_UEN}?amount={amount}&reference={reference}"
+        
+        # Use free QR code generation service
+        qr_generator_url = f"https://api.qrserver.com/v1/create-qr-code/?size=300x300&data={quote(paynow_url)}"
+        
+        response = requests.get(qr_generator_url, timeout=10)
+        if response.status_code == 200:
+            buffer = io.BytesIO(response.content)
+            buffer.seek(0)
+            return send_file(buffer, mimetype='image/png', as_attachment=False)
+        else:
+            # Fallback to local generation if API fails
+            return generate_paynow_qr()
+            
+    except Exception as e:
+        logging.error(f"PayNow QR fallback error: {e}")
+        # Final fallback to main function
+        return generate_paynow_qr()
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
