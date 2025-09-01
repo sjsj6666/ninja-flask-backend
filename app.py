@@ -137,7 +137,7 @@ def generate_paynow_qr():
     
     payload_string = build_payload(payload_parts)
     
-    crc_calculator = Calculator(Crc16.CRC_CCITT_FALSE)
+    crc_calculator = Calculator(Crc16.CCITT_KERMIT)
     payload_with_crc_placeholder = payload_string + '6304'
     checksum = crc_calculator.checksum(payload_with_crc_placeholder.encode('utf-8'))
     checksum_hex = f'{checksum:04X}'
