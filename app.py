@@ -1,5 +1,3 @@
-# app.py (Final, Complete, Unabridged Version with Airwallex Integration)
-
 import os
 import logging
 import time
@@ -29,14 +27,12 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 port = int(os.environ.get("PORT", 5001))
 
 # --- SERVICE CLIENTS INITIALIZATION ---
-# Supabase Client
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise ValueError("CRITICAL: Supabase credentials must be set.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-# Airwallex Client
 AIRWALLEX_CLIENT_ID = os.environ.get('AIRWALLEX_CLIENT_ID')
 AIRWALLEX_API_KEY = os.environ.get('AIRWALLEX_API_KEY')
 if not AIRWALLEX_CLIENT_ID or not AIRWALLEX_API_KEY:
@@ -180,24 +176,45 @@ def airwallex_webhook():
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
 def check_game_id(game_slug_from_frontend, uid, server_id):
     game_lower = game_slug_from_frontend.lower()
-    result = {}
-    if not uid: return jsonify({"status": "error", "message": "User ID/Role ID is required."}), 400
-    if game_lower == "metal-slug-awakening": result = check_elitedias_msa_api(uid)
-    elif game_lower == "ragnarok-x-next-generation": result = check_nuverse_rox_api(uid)
-    elif game_lower == "mobile-legends-sg": result = check_smile_one_api("mobilelegends", uid, server_id, os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE"))
-    elif game_lower == "mobile-legends": result = check_smile_one_api("mobilelegends", uid, server_id, "25")
-    elif game_lower in ["genshin-impact", "zenless-zone-zero", "ragnarok-origin", "snowbreak-containment-zone"]:
-        razer_game_slug = "snowbreak" if game_lower == "snowbreak-containment-zone" else game_lower
-        result = check_razer_api(razer_game_slug, uid, server_id)
-    elif game_lower == "identity-v": result = check_identityv_api(server_id, uid)
-    elif game_lower in ["honkai-star-rail", "bloodstrike", "ragnarok-m-classic", "love-and-deepspace", "bigo-live"]:
-        smileone_game_code = {"honkai-star-rail": "honkaistarrail", "bloodstrike": "bloodstrike", "ragnarok-m-classic": "ragnarokmclassic", "love-and-deepspace": "loveanddeepspace", "bigo-live": "bigolive"}.get(game_lower)
-        result = check_smile_one_api(smileone_game_code, uid, server_id)
-    else: return jsonify({"status": "error", "message": f"Validation not configured for game: {game_slug_from_frontend}"}), 400
+    if not uid:
+        return jsonify({"status": "error", "message": "User ID/Role ID is required."}), 400
+
+    smileone_games_map = {
+        "honkai-star-rail": "honkaistarrail",
+        "bloodstrike": "bloodstrike",
+        "ragnarok-m-classic": "ragnarokmclassic",
+        "love-and-deepspace": "loveanddeepspace",
+        "bigo-live": "bigolive"
+    }
+    razer_games_map = {
+        "genshin-impact": "genshin-impact",
+        "zenless-zone-zero": "zenless-zone-zero",
+        "ragnarok-origin": "ragnarok-origin",
+        "snowbreak-containment-zone": "snowbreak"
+    }
+
+    game_handlers = {
+        "metal-slug-awakening": lambda: check_elitedias_msa_api(uid),
+        "ragnarok-x-next-generation": lambda: check_nuverse_rox_api(uid),
+        "mobile-legends-sg": lambda: check_smile_one_api("mobilelegends", uid, server_id, os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE")),
+        "mobile-legends": lambda: check_smile_one_api("mobilelegends", uid, server_id, "25"),
+        "identity-v": lambda: check_identityv_api(server_id, uid),
+    }
+
+    if game_lower in razer_games_map:
+        handler = lambda: check_razer_api(razer_games_map[game_lower], uid, server_id)
+    elif game_lower in smileone_games_map:
+        handler = lambda: check_smile_one_api(smileone_games_map[game_lower], uid, server_id)
+    else:
+        handler = game_handlers.get(game_lower)
+
+    if handler:
+        result = handler()
+    else:
+        result = {"status": "error", "message": f"Validation not configured for game: {game_slug_from_frontend}"}
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
-
 
 # --- API CHECK FUNCTIONS ---
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
