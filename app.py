@@ -7,9 +7,7 @@ import io
 import segno
 import requests
 import crcmod.predefined
-# --- MODIFICATION START ---
-from airwallex.client import Client as AirwallexClient # Import the Client class directly
-# --- MODIFICATION END ---
+import airwallex  # The main import is correct
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -41,14 +39,11 @@ if not AIRWALLEX_CLIENT_ID or not AIRWALLEX_API_KEY:
     raise ValueError("CRITICAL: Airwallex credentials must be set.")
 
 # --- MODIFICATION START ---
-# Initialize the client using the imported Client class
-client = AirwallexClient(
-    client_id=AIRWALLEX_CLIENT_ID,
-    api_key=AIRWALLEX_API_KEY,
-    account_id=os.environ.get('AIRWALLEX_ACCOUNT_ID')
-)
+# Set credentials directly on the airwallex module. This is the correct pattern.
+airwallex.client_id = AIRWALLEX_CLIENT_ID
+airwallex.api_key = AIRWALLEX_API_KEY
+airwallex.account_id = os.environ.get('AIRWALLEX_ACCOUNT_ID')
 # --- MODIFICATION END ---
-
 
 # --- API HEADERS & CONSTANTS ---
 SMILE_ONE_HEADERS = {
@@ -117,7 +112,9 @@ def create_payment_intent():
         amount = float(data['amount'])
         merchant_order_id = str(data['merchant_order_id'])
 
-        payment_intent = client.payment_intents.create(
+        # --- MODIFICATION START ---
+        # Changed PaymentIntent to payment_intent (lowercase)
+        payment_intent = airwallex.payment_intent.create(
             amount=amount,
             currency='SGD',
             merchant_order_id=merchant_order_id,
@@ -125,11 +122,13 @@ def create_payment_intent():
             payment_method_options={"paynow": {"type": "paynow"}}
         )
         
-        confirmed_intent = client.payment_intents.confirm(
+        # Changed PaymentIntent to payment_intent (lowercase)
+        confirmed_intent = airwallex.payment_intent.confirm(
             id=payment_intent.id,
             request_id=str(uuid.uuid4()),
             payment_method={"type": "paynow"}
         )
+        # --- MODIFICATION END ---
         
         qr_code_string = confirmed_intent.next_action.get('data', {}).get('qrCode')
         
@@ -154,7 +153,7 @@ def airwallex_webhook():
     headers = request.headers
     
     try:
-        # This part does not need the client instance and can be called directly.
+        # Webhook class is correctly capitalized and does not need client instance.
         from airwallex.webhook import Webhook
         event = Webhook.construct_event(
             payload,
