@@ -5,4 +5,5 @@ supabase
 gunicorn
 segno[pil]
 crcmod
-airwallex
+airwallex-sdk
+
