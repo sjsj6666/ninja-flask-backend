@@ -7,8 +7,7 @@ import io
 import segno
 import requests
 import crcmod.predefined
-# Correctly import the Client class
-from airwallex.client import Client as AirwallexClient
+import airwallex  # This is the correct import
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -39,12 +38,10 @@ AIRWALLEX_API_KEY = os.environ.get('AIRWALLEX_API_KEY')
 if not AIRWALLEX_CLIENT_ID or not AIRWALLEX_API_KEY:
     raise ValueError("CRITICAL: Airwallex credentials must be set.")
 
-# Correctly initialize the Airwallex client instance
-client = AirwallexClient(
-    client_id=AIRWALLEX_CLIENT_ID,
-    api_key=AIRWALLEX_API_KEY,
-    account_id=os.environ.get('AIRWALLEX_ACCOUNT_ID')
-)
+# This is the correct way to set credentials for this SDK
+airwallex.client_id = AIRWALLEX_CLIENT_ID
+airwallex.api_key = AIRWALLEX_API_KEY
+airwallex.account_id = os.environ.get('AIRWALLEX_ACCOUNT_ID')
 
 # --- API HEADERS & CONSTANTS ---
 SMILE_ONE_HEADERS = {
@@ -113,8 +110,8 @@ def create_payment_intent():
         amount = float(data['amount'])
         merchant_order_id = str(data['merchant_order_id'])
 
-        # Correctly use the client instance to access the payment_intents resource
-        payment_intent = client.payment_intents.create(
+        # CORRECTED: Use lowercase 'payment_intent' resource
+        payment_intent = airwallex.payment_intent.create(
             amount=amount,
             currency='SGD',
             merchant_order_id=merchant_order_id,
@@ -122,7 +119,8 @@ def create_payment_intent():
             payment_method_options={"paynow": {"type": "paynow"}}
         )
         
-        confirmed_intent = client.payment_intents.confirm(
+        # CORRECTED: Use lowercase 'payment_intent' resource
+        confirmed_intent = airwallex.payment_intent.confirm(
             id=payment_intent.id,
             request_id=str(uuid.uuid4()),
             payment_method={"type": "paynow"}
