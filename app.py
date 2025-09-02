@@ -1,3 +1,18 @@
+
+This error occurred because even after correcting the `Client` initialization, the code was still trying to access the `payment_intent` resource from the main `airwallex` module instead of the `client` instance you created.
+
+It seems my last provided code snippet had an error. Let's correct it definitively now.
+
+### The Final, Corrected `app.py`
+
+The logic should be:
+1.  Import `Client` from `airwallex.client`.
+2.  Create an instance: `client = Client(...)`.
+3.  Use that instance to make API calls: `client.payment_intents.create(...)`.
+
+Here is the code with the correct implementation. This version ensures the initialized `client` object is used for all payment intent operations.
+
+```python
 import os
 import logging
 import time
@@ -7,7 +22,8 @@ import io
 import segno
 import requests
 import crcmod.predefined
-import airwallex  # The main import is correct
+# Correctly import the Client class
+from airwallex.client import Client as AirwallexClient
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -38,12 +54,12 @@ AIRWALLEX_API_KEY = os.environ.get('AIRWALLEX_API_KEY')
 if not AIRWALLEX_CLIENT_ID or not AIRWALLEX_API_KEY:
     raise ValueError("CRITICAL: Airwallex credentials must be set.")
 
-# --- MODIFICATION START ---
-# Set credentials directly on the airwallex module. This is the correct pattern.
-airwallex.client_id = AIRWALLEX_CLIENT_ID
-airwallex.api_key = AIRWALLEX_API_KEY
-airwallex.account_id = os.environ.get('AIRWALLEX_ACCOUNT_ID')
-# --- MODIFICATION END ---
+# Correctly initialize the Airwallex client instance
+client = AirwallexClient(
+    client_id=AIRWALLEX_CLIENT_ID,
+    api_key=AIRWALLEX_API_KEY,
+    account_id=os.environ.get('AIRWALLEX_ACCOUNT_ID')
+)
 
 # --- API HEADERS & CONSTANTS ---
 SMILE_ONE_HEADERS = {
@@ -112,9 +128,8 @@ def create_payment_intent():
         amount = float(data['amount'])
         merchant_order_id = str(data['merchant_order_id'])
 
-        # --- MODIFICATION START ---
-        # Changed PaymentIntent to payment_intent (lowercase)
-        payment_intent = airwallex.payment_intent.create(
+        # Correctly use the client instance to access the payment_intents resource
+        payment_intent = client.payment_intents.create(
             amount=amount,
             currency='SGD',
             merchant_order_id=merchant_order_id,
@@ -122,13 +137,11 @@ def create_payment_intent():
             payment_method_options={"paynow": {"type": "paynow"}}
         )
         
-        # Changed PaymentIntent to payment_intent (lowercase)
-        confirmed_intent = airwallex.payment_intent.confirm(
+        confirmed_intent = client.payment_intents.confirm(
             id=payment_intent.id,
             request_id=str(uuid.uuid4()),
             payment_method={"type": "paynow"}
         )
-        # --- MODIFICATION END ---
         
         qr_code_string = confirmed_intent.next_action.get('data', {}).get('qrCode')
         
@@ -153,7 +166,6 @@ def airwallex_webhook():
     headers = request.headers
     
     try:
-        # Webhook class is correctly capitalized and does not need client instance.
         from airwallex.webhook import Webhook
         event = Webhook.construct_event(
             payload,
