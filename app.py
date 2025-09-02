@@ -1,4 +1,4 @@
-# app.py (Final, Complete, Unabridged, and Corrected Version)
+# app.py (Final, Complete, Unabridged Version with Airwallex Integration)
 
 import os
 import logging
@@ -9,6 +9,7 @@ import io
 import segno
 import requests
 import crcmod.predefined
+import airwallex
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -27,12 +28,22 @@ CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 5001))
 
-# --- SUPABASE CLIENT INITIALIZATION (using secure service key) ---
+# --- SERVICE CLIENTS INITIALIZATION ---
+# Supabase Client
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-    raise ValueError("CRITICAL: SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in environment variables.")
+    raise ValueError("CRITICAL: Supabase credentials must be set.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+# Airwallex Client
+AIRWALLEX_CLIENT_ID = os.environ.get('AIRWALLEX_CLIENT_ID')
+AIRWALLEX_API_KEY = os.environ.get('AIRWALLEX_API_KEY')
+if not AIRWALLEX_CLIENT_ID or not AIRWALLEX_API_KEY:
+    raise ValueError("CRITICAL: Airwallex credentials must be set.")
+airwallex.client_id = AIRWALLEX_CLIENT_ID
+airwallex.api_key = AIRWALLEX_API_KEY
+airwallex.account_id = os.environ.get('AIRWALLEX_ACCOUNT_ID')
 
 # --- API HEADERS & CONSTANTS ---
 SMILE_ONE_HEADERS = {
@@ -70,8 +81,7 @@ MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 # --- FLASK ROUTES ---
 @app.route('/')
 def home():
-    return "NinjaTopUp Validation & Services Backend is Live!"
-
+    return "NinjaTopUp API Backend is Live!"
 
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
@@ -92,69 +102,79 @@ def get_rates():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-@app.route('/generate-paynow-qr', methods=['GET'])
-def generate_paynow_qr():
-    PAYNOW_UEN = os.environ.get("PAYNOW_UEN") 
-    PAYNOW_MERCHANT_NAME = os.environ.get("PAYNOW_MERCHANT_NAME", "NinjaTopUp")
-    amount = request.args.get('amount')
-    reference = request.args.get('ref')
-
-    if not PAYNOW_UEN:
-        logging.error("PayNow UEN is not set in environment variables.")
-        return jsonify({"error": "Server payment configuration is missing."}), 500
-    if not reference or not (1 <= len(reference.strip()) <= 25):
-        return jsonify({"error": "A valid payment reference (1-25 chars) is required."}), 400
-    try:
-        amount_val = float(amount)
-        if amount_val <= 0:
-            return jsonify({"error": "Payment amount must be a positive number."}), 400
-        amount_fmt = f"{amount_val:.2f}"
-    except (ValueError, TypeError):
-        return jsonify({"error": "A valid payment amount is required."}), 400
+@app.route('/create-payment-intent', methods=['POST'])
+def create_payment_intent():
+    data = request.get_json()
+    if not data or 'amount' not in data or 'merchant_order_id' not in data:
+        return jsonify({'error': 'Amount and merchant_order_id are required.'}), 400
 
     try:
-        # Build the compliant SGQR Payload
-        payload_parts = {
-            '00': '01', '01': '12',
-            '26': {'00': 'sg.com.paynow', '01': '2', '02': PAYNOW_UEN, '03': '1'},
-            '52': '0000', '53': '702', '54': amount_fmt, '58': 'SG', 
-            '59': PAYNOW_MERCHANT_NAME[:25],
-            '60': 'Singapore',
-            '62': {'01': reference}
-        }
-        def build_payload(parts):
-            result = ""
-            for tag in sorted(parts.keys()):
-                value = parts[tag]
-                if isinstance(value, dict):
-                    sub_payload = build_payload(value)
-                    result += f"{tag}{len(sub_payload):02d}{sub_payload}"
-                else:
-                    result += f"{tag}{len(value):02d}{value}"
-            return result
-        
-        payload_string = build_payload(payload_parts)
-        
-        # Calculate and append the CRC checksum
-        payload_with_crc_placeholder = payload_string + '6304'
-        crc16_func = crcmod.predefined.mkCrcFun('crc-ccitt-false')
-        checksum = crc16_func(payload_with_crc_placeholder.encode('utf-8'))
-        checksum_hex = f'{checksum:04X}'
-        final_payload = payload_with_crc_placeholder + checksum_hex
+        amount = float(data['amount'])
+        merchant_order_id = str(data['merchant_order_id'])
 
-        # Generate QR code image in memory
-        buf = io.BytesIO()
-        qr = segno.make_qr(final_payload, error='M')
-        qr.save(buf, kind='png', scale=10, border=4)
-        buf.seek(0)
+        payment_intent = airwallex.PaymentIntent.create(
+            amount=amount,
+            currency='SGD',
+            merchant_order_id=merchant_order_id,
+            request_id=str(uuid.uuid4()),
+            payment_method_options={"paynow": {"type": "paynow"}}
+        )
         
-        return send_file(buf, mimetype='image/png')
+        confirmed_intent = airwallex.PaymentIntent.confirm(
+            id=payment_intent.id,
+            request_id=str(uuid.uuid4()),
+            payment_method={"type": "paynow"}
+        )
         
+        qr_code_string = confirmed_intent.next_action.get('data', {}).get('qrCode')
+        
+        return jsonify({
+            'payment_intent_id': confirmed_intent.id,
+            'client_secret': confirmed_intent.client_secret,
+            'qr_code_data': qr_code_string
+        })
+
     except Exception as e:
-        logging.error(f"PayNow QR code generation failed: {e}")
-        return jsonify({"error": "An internal error occurred while generating the QR code."}), 500
+        logging.error(f"Airwallex Payment Intent creation failed: {e}")
+        return jsonify({"error": f"Failed to create payment intent: {str(e)}"}), 500
 
+@app.route('/airwallex-webhook', methods=['POST'])
+def airwallex_webhook():
+    webhook_signing_secret = os.environ.get('AIRWALLEX_WEBHOOK_SECRET')
+    if not webhook_signing_secret:
+        logging.error("AIRWALLEX_WEBHOOK_SECRET is not configured.")
+        return 'Configuration error', 500
+
+    payload = request.data
+    headers = request.headers
+    
+    try:
+        event = airwallex.Webhook.construct_event(
+            payload,
+            headers.get('x-timestamp'),
+            headers.get('x-signature'),
+            webhook_signing_secret
+        )
+
+        if event.name == 'payment_intent.succeeded':
+            payment_intent = event.data.get('object', {})
+            merchant_order_id = payment_intent.get('merchant_order_id')
+            
+            if merchant_order_id:
+                logging.info(f"Payment succeeded for order: {merchant_order_id}. Updating status.")
+                supabase.table('orders').update({
+                    'status': 'Processing'
+                }).eq('orderid', merchant_order_id).execute()
+
+    except ValueError:
+        return 'Invalid payload', 400
+    except airwallex.error.SignatureVerificationError:
+        return 'Invalid signature', 400
+    except Exception as e:
+        logging.error(f"Webhook handler error: {e}")
+        return 'Internal server error', 500
+
+    return 'Success', 200
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
