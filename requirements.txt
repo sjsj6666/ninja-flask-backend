@@ -6,4 +6,4 @@ gunicorn
 segno[pil]
 crcmod
 airwallex-sdk
-
+email-validator
