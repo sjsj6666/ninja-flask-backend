@@ -1,18 +1,4 @@
-
-This error occurred because even after correcting the `Client` initialization, the code was still trying to access the `payment_intent` resource from the main `airwallex` module instead of the `client` instance you created.
-
-It seems my last provided code snippet had an error. Let's correct it definitively now.
-
-### The Final, Corrected `app.py`
-
-The logic should be:
-1.  Import `Client` from `airwallex.client`.
-2.  Create an instance: `client = Client(...)`.
-3.  Use that instance to make API calls: `client.payment_intents.create(...)`.
-
-Here is the code with the correct implementation. This version ensures the initialized `client` object is used for all payment intent operations.
-
-```python
+python
 import os
 import logging
 import time
