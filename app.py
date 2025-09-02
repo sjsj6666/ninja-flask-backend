@@ -7,7 +7,9 @@ import io
 import segno
 import requests
 import crcmod.predefined
-import airwallex
+# --- MODIFICATION START ---
+from airwallex.client import Client as AirwallexClient # Import the Client class directly
+# --- MODIFICATION END ---
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -38,15 +40,17 @@ AIRWALLEX_API_KEY = os.environ.get('AIRWALLEX_API_KEY')
 if not AIRWALLEX_CLIENT_ID or not AIRWALLEX_API_KEY:
     raise ValueError("CRITICAL: Airwallex credentials must be set.")
 
-### --- MODIFICATION --- ###
-# Changed airwallex.Client to airwallex.client (lowercase 'c')
-client = airwallex.client(
+# --- MODIFICATION START ---
+# Initialize the client using the imported Client class
+client = AirwallexClient(
     client_id=AIRWALLEX_CLIENT_ID,
     api_key=AIRWALLEX_API_KEY,
     account_id=os.environ.get('AIRWALLEX_ACCOUNT_ID')
 )
+# --- MODIFICATION END ---
 
-# --- API HEADERS & CONSTANTS (No changes in this section) ---
+
+# --- API HEADERS & CONSTANTS ---
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -77,6 +81,7 @@ ELITEDIAS_MSA_VALIDATE_URL = "https://api.elitedias.com/checkid"
 ELITEDIAS_MSA_GAME_ID = "metal_slug"
 ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8"}
 MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
+
 
 # --- FLASK ROUTES ---
 @app.route('/')
@@ -111,7 +116,7 @@ def create_payment_intent():
     try:
         amount = float(data['amount'])
         merchant_order_id = str(data['merchant_order_id'])
-        
+
         payment_intent = client.payment_intents.create(
             amount=amount,
             currency='SGD',
@@ -149,7 +154,9 @@ def airwallex_webhook():
     headers = request.headers
     
     try:
-        event = airwallex.Webhook.construct_event(
+        # This part does not need the client instance and can be called directly.
+        from airwallex.webhook import Webhook
+        event = Webhook.construct_event(
             payload,
             headers.get('x-timestamp'),
             headers.get('x-signature'),
@@ -168,8 +175,6 @@ def airwallex_webhook():
 
     except ValueError:
         return 'Invalid payload', 400
-    except airwallex.error.SignatureVerificationError:
-        return 'Invalid signature', 400
     except Exception as e:
         logging.error(f"Webhook handler error: {e}")
         return 'Internal server error', 500
@@ -220,6 +225,8 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
+
+# --- API CHECK FUNCTIONS ---
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
     endpoints = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "honkaistarrail": "https://www.smile.one/br/merchant/honkai/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/", "bigolive": "https://www.smile.one/sg/merchant/bigo/checkrole"}
     if game_code_for_smileone not in endpoints: return {"status": "error", "message": f"Game '{game_code_for_smileone}' not configured for SmileOne."}
