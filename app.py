@@ -7,7 +7,7 @@ import io
 import segno
 import requests
 import crcmod.predefined
-import airwallex  # This import is still correct
+import airwallex
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -38,22 +38,13 @@ AIRWALLEX_API_KEY = os.environ.get('AIRWALLEX_API_KEY')
 if not AIRWALLEX_CLIENT_ID or not AIRWALLEX_API_KEY:
     raise ValueError("CRITICAL: Airwallex credentials must be set.")
 
-### --- MODIFICATION START --- ###
-
-# DELETED: Old method of setting global credentials
-# airwallex.client_id = AIRWALLEX_CLIENT_ID
-# airwallex.api_key = AIRWALLEX_API_KEY
-# airwallex.account_id = os.environ.get('AIRWALLEX_ACCOUNT_ID')
-
-# ADDED: New method of creating a client instance
-client = airwallex.Client(
+### --- MODIFICATION --- ###
+# Changed airwallex.Client to airwallex.client (lowercase 'c')
+client = airwallex.client(
     client_id=AIRWALLEX_CLIENT_ID,
     api_key=AIRWALLEX_API_KEY,
     account_id=os.environ.get('AIRWALLEX_ACCOUNT_ID')
 )
-
-### --- MODIFICATION END --- ###
-
 
 # --- API HEADERS & CONSTANTS (No changes in this section) ---
 SMILE_ONE_HEADERS = {
@@ -64,7 +55,6 @@ SMILE_ONE_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
     "Cookie": os.environ.get("SMILE_ONE_COOKIE")
 }
-# ... (rest of constants are unchanged) ...
 NETEASE_IDV_BASE_URL_TEMPLATE = "https://pay.neteasegames.com/gameclub/identityv/{server_code}/login-role"
 NETEASE_IDV_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Referer": "https://pay.neteasegames.com/identityv/topup", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"}
 NETEASE_IDV_STATIC_PARAMS = { "gc_client_version": "1.9.111", "client_type": "gameclub" }
@@ -95,7 +85,6 @@ def home():
 
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
-    # ... (This function is unchanged) ...
     try:
         response = supabase.table('site_settings').select('setting_value').eq('setting_key', 'exchangerate_api_key').single().execute()
         api_key_data = response.data
@@ -123,12 +112,6 @@ def create_payment_intent():
         amount = float(data['amount'])
         merchant_order_id = str(data['merchant_order_id'])
         
-        ### --- MODIFICATION START --- ###
-
-        # DELETED: Old static class method
-        # payment_intent = airwallex.PaymentIntent.create(...)
-        
-        # ADDED: Using the client instance to access the payment_intents resource
         payment_intent = client.payment_intents.create(
             amount=amount,
             currency='SGD',
@@ -137,17 +120,11 @@ def create_payment_intent():
             payment_method_options={"paynow": {"type": "paynow"}}
         )
         
-        # DELETED: Old static class method
-        # confirmed_intent = airwallex.PaymentIntent.confirm(...)
-        
-        # ADDED: Using the client instance to confirm
         confirmed_intent = client.payment_intents.confirm(
             id=payment_intent.id,
             request_id=str(uuid.uuid4()),
             payment_method={"type": "paynow"}
         )
-        
-        ### --- MODIFICATION END --- ###
         
         qr_code_string = confirmed_intent.next_action.get('data', {}).get('qrCode')
         
@@ -172,7 +149,6 @@ def airwallex_webhook():
     headers = request.headers
     
     try:
-        # NOTE: The Webhook class is used correctly here as a utility, no changes needed.
         event = airwallex.Webhook.construct_event(
             payload,
             headers.get('x-timestamp'),
@@ -200,7 +176,6 @@ def airwallex_webhook():
 
     return 'Success', 200
 
-# ... (The rest of the file, including all check_game_id and API check functions, remains unchanged) ...
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
 def check_game_id(game_slug_from_frontend, uid, server_id):
