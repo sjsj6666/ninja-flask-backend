@@ -104,7 +104,12 @@ def create_paynow_qr():
             'reference': order_id
         }
         
-        response = requests.post(guidesify_url, data=payload, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.post(guidesify_url, data=payload, headers=headers)
         response.raise_for_status()
         
         response_data = response.json()
@@ -302,4 +307,4 @@ def check_elitedias_msa_api(role_id):
     except Exception as e: return {"status": "error", "message": "API Error (EliteDias)"}
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=True)```
