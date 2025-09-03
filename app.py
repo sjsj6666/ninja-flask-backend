@@ -5,6 +5,7 @@ import uuid
 import json
 import base64
 import requests
+import certifi
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -28,7 +29,36 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise ValueError("CRITICAL: Supabase credentials must be set.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-# --- All other constants for SmileOne, Razer, etc. remain the same ---
+SMILE_ONE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "Origin": "https://www.smile.one",
+    "X-Requested-With": "XMLHttpRequest",
+    "Cookie": os.environ.get("SMILE_ONE_COOKIE")
+}
+NETEASE_IDV_BASE_URL_TEMPLATE = "https://pay.neteasegames.com/gameclub/identityv/{server_code}/login-role"
+NETEASE_IDV_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Referer": "https://pay.neteasegames.com/identityv/topup", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"}
+NETEASE_IDV_STATIC_PARAMS = { "gc_client_version": "1.9.111", "client_type": "gameclub" }
+IDV_SERVER_CODES = { "asia": "2001", "na-eu": "2011" }
+RAZER_GOLD_COMMON_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"}
+RAZER_GOLD_GENSHIN_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/genshinimpact/users/{user_id}"
+RAZER_GOLD_GENSHIN_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy(); RAZER_GOLD_GENSHIN_HEADERS["Referer"] = "https://gold.razer.com/sg/en/gold/catalog/genshin-impact"
+RAZER_GOLD_ZZZ_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/custom/cognosphere-zenless-zone-zero/users/{user_id}"
+RAZER_GOLD_ZZZ_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy(); RAZER_GOLD_ZZZ_HEADERS["Referer"] = "https://gold.razer.com/sg/en/gold/catalog/zenless-zone-zero"
+RAZER_ZZZ_SERVER_ID_MAP = {"prod_official_asia": "prod_gf_jp","prod_official_usa": "prod_gf_us","prod_official_eur": "prod_gf_eu","prod_official_cht": "prod_gf_sg"}
+RAZER_GOLD_RO_ORIGIN_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/custom/gravity-ragnarok-origin/users/{user_id}"
+RAZER_GOLD_RO_ORIGIN_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy()
+RAZER_GOLD_SNOWBREAK_API_URL_TEMPLATE = "https://gold.razer.com/api/ext/custom/seasun-games-snowbreak-containment-zone/users/{user_id}"
+RAZER_GOLD_SNOWBREAK_HEADERS = RAZER_GOLD_COMMON_HEADERS.copy()
+RAZER_SNOWBREAK_SERVER_ID_MAP = {"sea": "215","asia": "225","americas": "235","europe": "245"}
+NUVERSE_ROX_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
+NUVERSE_ROX_AID = "3402"
+NUVERSE_ROX_HEADERS = {"User-Agent": "Mozilla/5.0"}
+ELITEDIAS_MSA_VALIDATE_URL = "https://api.elitedias.com/checkid"
+ELITEDIAS_MSA_GAME_ID = "metal_slug"
+ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8"}
+MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 
 @app.route('/')
 def home():
@@ -44,7 +74,7 @@ def get_rates():
         
         API_KEY = api_key_data['setting_value']
         url = f"https://v6.exchangerate-api.com/v6/{API_KEY}/latest/SGD"
-        api_response = requests.get(url, timeout=10)
+        api_response = requests.get(url, timeout=10, verify=certifi.where())
         api_response.raise_for_status()
         data = api_response.json()
         if data.get('result') == 'success':
@@ -67,8 +97,6 @@ def create_paynow_qr():
 
         sgqrcode_url = "https://sgpaynowqr.com/generate-paynow-qr"
         
-        # This API uses multipart/form-data, but we send JSON within one of the parts
-        # The 'requests' library handles the encoding for us.
         form_data = {
             'json': (None, json.dumps({
                 "payment_type": "uen",
@@ -84,11 +112,10 @@ def create_paynow_qr():
             'Referer': 'https://sgpaynowqr.com/'
         }
         
-        response = requests.post(sgqrcode_url, files=form_data, headers=headers)
+        response = requests.post(sgqrcode_url, files=form_data, headers=headers, verify=certifi.where())
         response.raise_for_status()
         
         response_data = response.json()
-        
         qr_code_data_uri = response_data.get('qr_image')
 
         if not qr_code_data_uri:
@@ -145,8 +172,6 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
-
-
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
     endpoints = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "honkaistarrail": "https://www.smile.one/br/merchant/honkai/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/", "bigolive": "https://www.smile.one/sg/merchant/bigo/checkrole"}
     if game_code_for_smileone not in endpoints: return {"status": "error", "message": f"Game '{game_code_for_smileone}' not configured for SmileOne."}
@@ -168,7 +193,7 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
     raw_text = ""
     try:
         req_url = f"{url}?product=bloodstrike" if game_code_for_smileone == "bloodstrike" else url
-        response = requests.post(req_url, data=params, headers=current_headers, timeout=10)
+        response = requests.post(req_url, data=params, headers=current_headers, timeout=10, verify=certifi.where())
         response.raise_for_status(); raw_text = response.text
         data = response.json()
         if data.get("code") == 200:
@@ -204,7 +229,7 @@ def check_identityv_api(server_frontend_key, roleid):
     logging.info(f"Sending Netease IDV: URL='{url}', Params={params}")
     raw_text = ""
     try:
-        response = requests.get(url, params=params, headers=current_headers, timeout=10)
+        response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
         raw_text = response.text
         data = response.json()
         api_code = data.get("code"); api_msg = (data.get("message", "") or data.get("msg", "")).strip()
@@ -230,7 +255,7 @@ def check_razer_api(game_slug, user_id, server_id_frontend_key):
     params = {"serverId": api_server_id_param_value} if api_server_id_param_value else {}
     logging.info(f"Sending Razer {config['name']}: URL='{url}', Params={params}")
     try:
-        response = requests.get(url, params=params, headers=config["headers"], timeout=10)
+        response = requests.get(url, params=params, headers=config["headers"], timeout=10, verify=certifi.where())
         data = response.json()
         if response.status_code == 200:
             username = data.get("username") or data.get("name") if game_slug != "ragnarok-origin" else data.get("roles", [{}])[0].get("Name") if "roles" in data and data["roles"] else None
@@ -250,7 +275,7 @@ def check_nuverse_rox_api(role_id):
     current_headers["x-tea-payload"] = json.dumps(tea_payload_data)
     logging.info(f"Sending Nuverse ROX: URL='{NUVERSE_ROX_VALIDATE_URL}', Params={params}")
     try:
-        response = requests.get(NUVERSE_ROX_VALIDATE_URL, params=params, headers=current_headers, timeout=10)
+        response = requests.get(NUVERSE_ROX_VALIDATE_URL, params=params, headers=current_headers, timeout=10, verify=certifi.where())
         data = response.json()
         if data.get("code") == 0 and data.get("message", "").lower() == "success":
             if "data" in data and data["data"]:
@@ -267,7 +292,7 @@ def check_elitedias_msa_api(role_id):
     payload = {"game": ELITEDIAS_MSA_GAME_ID, "userid": str(role_id)}
     logging.info(f"Sending EliteDias MSA: URL='{ELITEDIAS_MSA_VALIDATE_URL}', Payload='{json.dumps(payload)}'")
     try:
-        response = requests.post(ELITEDIAS_MSA_VALIDATE_URL, json=payload, headers=ELITEDIAS_MSA_HEADERS, timeout=12)
+        response = requests.post(ELITEDIAS_MSA_VALIDATE_URL, json=payload, headers=ELITEDIAS_MSA_HEADERS, timeout=12, verify=certifi.where())
         data = response.json()
         if response.status_code == 200 and data.get("valid") == "valid":
             username = data.get("username") or data.get("nickname") or data.get("name")
@@ -280,4 +305,3 @@ def check_elitedias_msa_api(role_id):
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=True)
-    
