@@ -7,15 +7,14 @@ import io
 import segno
 import requests
 import crcmod.predefined
-import airwallex  # This is the correct import
 from flask import Flask, jsonify, request, send_file
 from flask_cors import CORS
 from supabase import create_client, Client
 from urllib.parse import quote
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
-# --- CONFIGURATION ---
 allowed_origins = [
     "http://127.0.0.1:5500",
     "http://localhost:5500",
@@ -26,24 +25,12 @@ CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 5001))
 
-# --- SERVICE CLIENTS INITIALIZATION ---
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise ValueError("CRITICAL: Supabase credentials must be set.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-AIRWALLEX_CLIENT_ID = os.environ.get('AIRWALLEX_CLIENT_ID')
-AIRWALLEX_API_KEY = os.environ.get('AIRWALLEX_API_KEY')
-if not AIRWALLEX_CLIENT_ID or not AIRWALLEX_API_KEY:
-    raise ValueError("CRITICAL: Airwallex credentials must be set.")
-
-# This is the correct way to set credentials for this SDK
-airwallex.client_id = AIRWALLEX_CLIENT_ID
-airwallex.api_key = AIRWALLEX_API_KEY
-airwallex.account_id = os.environ.get('AIRWALLEX_ACCOUNT_ID')
-
-# --- API HEADERS & CONSTANTS ---
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -75,8 +62,6 @@ ELITEDIAS_MSA_GAME_ID = "metal_slug"
 ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8"}
 MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 
-
-# --- FLASK ROUTES ---
 @app.route('/')
 def home():
     return "NinjaTopUp API Backend is Live!"
@@ -100,80 +85,68 @@ def get_rates():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/create-payment-intent', methods=['POST'])
-def create_payment_intent():
+def generate_paynow_qr_payload(amount, ref_id, mobile_number):
+    PAYLOAD_FORMAT_INDICATOR = "000201"
+    POINT_OF_INITIATION_METHOD = "010211"
+    MERCHANT_ACCOUNT_INFO_HEADER = "26"
+    GUID = "0009SG.PAYNOW"
+    PROXY_TYPE = "01010"
+    PROXY_VALUE_HEADER = "02"
+    EDITABLE_AMOUNT = "03010"
+    COUNTRY_CODE = "5802SG"
+    MERCHANT_NAME = "5906PayNow"
+    MERCHANT_CITY = "6009Singapore"
+    CRC_HEADER = "6304"
+
+    mobile_field = f"{PROXY_VALUE_HEADER}{len(mobile_number):02d}{mobile_number}"
+    merchant_account_payload = f"{GUID}{PROXY_TYPE}{mobile_field}{EDITABLE_AMOUNT}"
+    
+    transaction_amount_field = f"54{len(f'{amount:.2f}'):02d}{amount:.2f}"
+    
+    ref_id_field = f"07{len(ref_id):02d}{ref_id}" if ref_id else ""
+    merchant_info_additional = f"62{len(ref_id_field):02d}{ref_id_field}" if ref_id else ""
+    
+    payload_without_crc = (
+        f"{PAYLOAD_FORMAT_INDICATOR}"
+        f"{POINT_OF_INITIATION_METHOD}"
+        f"{MERCHANT_ACCOUNT_INFO_HEADER}{len(merchant_account_payload):02d}{merchant_account_payload}"
+        f"5303702"
+        f"{transaction_amount_field}"
+        f"{COUNTRY_CODE}"
+        f"{MERCHANT_NAME}"
+        f"{MERCHANT_CITY}"
+        f"{merchant_info_additional}"
+        f"{CRC_HEADER}"
+    )
+    
+    crc_func = crcmod.predefined.mkPredefinedCrcFun('crc-ccitt-false')
+    crc_checksum = f"{crc_func(payload_without_crc.encode()):04X}"
+    
+    return f"{payload_without_crc}{crc_checksum}"
+
+@app.route('/create-paynow-qr', methods=['POST'])
+def create_paynow_qr():
     data = request.get_json()
-    if not data or 'amount' not in data or 'merchant_order_id' not in data:
-        return jsonify({'error': 'Amount and merchant_order_id are required.'}), 400
+    if not data or 'amount' not in data or 'order_id' not in data:
+        return jsonify({'error': 'Amount and order_id are required.'}), 400
 
     try:
         amount = float(data['amount'])
-        merchant_order_id = str(data['merchant_order_id'])
+        order_id = str(data['order_id'])
+        mobile_number = os.environ.get('PAYNOW_MOBILE_NUMBER', '84603731') 
+        
+        payload_string = generate_paynow_qr_payload(amount, order_id, mobile_number)
 
-        # CORRECTED: Use lowercase 'payment_intent' resource
-        payment_intent = airwallex.payment_intent.create(
-            amount=amount,
-            currency='SGD',
-            merchant_order_id=merchant_order_id,
-            request_id=str(uuid.uuid4()),
-            payment_method_options={"paynow": {"type": "paynow"}}
-        )
-        
-        # CORRECTED: Use lowercase 'payment_intent' resource
-        confirmed_intent = airwallex.payment_intent.confirm(
-            id=payment_intent.id,
-            request_id=str(uuid.uuid4()),
-            payment_method={"type": "paynow"}
-        )
-        
-        qr_code_string = confirmed_intent.next_action.get('data', {}).get('qrCode')
+        qrcode_data_uri = segno.make(payload_string, error='h').data_uri(scale=10)
         
         return jsonify({
-            'payment_intent_id': confirmed_intent.id,
-            'client_secret': confirmed_intent.client_secret,
-            'qr_code_data': qr_code_string
+            'qr_code_data': qrcode_data_uri,
+            'message': 'QR code generated successfully.'
         })
 
     except Exception as e:
-        logging.error(f"Airwallex Payment Intent creation failed: {e}")
-        return jsonify({"error": f"Failed to create payment intent: {str(e)}"}), 500
-
-@app.route('/airwallex-webhook', methods=['POST'])
-def airwallex_webhook():
-    webhook_signing_secret = os.environ.get('AIRWALLEX_WEBHOOK_SECRET')
-    if not webhook_signing_secret:
-        logging.error("AIRWALLEX_WEBHOOK_SECRET is not configured.")
-        return 'Configuration error', 500
-
-    payload = request.data
-    headers = request.headers
-    
-    try:
-        from airwallex.webhook import Webhook
-        event = Webhook.construct_event(
-            payload,
-            headers.get('x-timestamp'),
-            headers.get('x-signature'),
-            webhook_signing_secret
-        )
-
-        if event.name == 'payment_intent.succeeded':
-            payment_intent = event.data.get('object', {})
-            merchant_order_id = payment_intent.get('merchant_order_id')
-            
-            if merchant_order_id:
-                logging.info(f"Payment succeeded for order: {merchant_order_id}. Updating status.")
-                supabase.table('orders').update({
-                    'status': 'Processing'
-                }).eq('orderid', merchant_order_id).execute()
-
-    except ValueError:
-        return 'Invalid payload', 400
-    except Exception as e:
-        logging.error(f"Webhook handler error: {e}")
-        return 'Internal server error', 500
-
-    return 'Success', 200
+        logging.error(f"PayNow QR generation failed: {e}")
+        return jsonify({"error": f"Failed to generate QR code: {str(e)}"}), 500
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
@@ -219,8 +192,6 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
-
-# --- API CHECK FUNCTIONS ---
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
     endpoints = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "honkaistarrail": "https://www.smile.one/br/merchant/honkai/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/", "bigolive": "https://www.smile.one/sg/merchant/bigo/checkrole"}
     if game_code_for_smileone not in endpoints: return {"status": "error", "message": f"Game '{game_code_for_smileone}' not configured for SmileOne."}
