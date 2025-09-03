@@ -3,14 +3,13 @@ import logging
 import time
 import uuid
 import json
-import io
-import segno
+import base64 # Import the base64 library
 import requests
-import crcmod.predefined
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
 from urllib.parse import quote
+from datetime import datetime, timedelta
 
 app = Flask(__name__)
 
@@ -93,33 +92,34 @@ def create_paynow_qr():
     try:
         amount = float(data['amount'])
         order_id = str(data['order_id'])
-        paynow_uen = os.environ.get('PAYNOW_UEN', '53506028m') 
+        paynow_uen = os.environ.get('PAYNOW_UEN', '53506028m')
+        company_name = os.environ.get('PAYNOW_COMPANY_NAME', 'GAMEBASE')
 
-        guidesify_url = "https://app.guidesify.com/paynow-generator?/generate"
-        payload = {
-            'accountType': 'uen',
+        # Set an expiry time (e.g., 10 minutes from now)
+        expiry_time = datetime.now() + timedelta(minutes=10)
+        expiry_str = expiry_time.strftime('%Y/%m/%d %H:%M')
+
+        # Build the URL for the new API
+        sgqrcode_url = "https://www.sgqrcode.com/paynow"
+        params = {
             'uen': paynow_uen,
-            'isEditable': 'false',
+            'editable': 0,
             'amount': amount,
-            'reference': order_id
+            'expiry': expiry_str,
+            'ref_id': order_id,
+            'company': company_name
         }
-        
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        response = requests.post(guidesify_url, data=payload, headers=headers)
+
+        # Make the GET request to fetch the image directly
+        response = requests.get(sgqrcode_url, params=params)
         response.raise_for_status()
+
+        # Get the raw image content and encode it in Base64
+        image_bytes = response.content
+        base64_encoded_data = base64.b64encode(image_bytes).decode('utf-8')
         
-        response_data = response.json()
-        data_list = json.loads(response_data['data'])
-        qr_string = data_list[2]
-
-        if not qr_string:
-            raise ValueError("QR string not found in Guidesify API response")
-
-        qrcode_data_uri = segno.make(qr_string, error='h').data_uri(scale=10)
+        # Create the full data URI for the image
+        qrcode_data_uri = f"data:image/png;base64,{base64_encoded_data}"
         
         return jsonify({
             'qr_code_data': qrcode_data_uri,
@@ -127,11 +127,8 @@ def create_paynow_qr():
         })
 
     except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to call Guidesify API: {e}")
+        logging.error(f"Failed to call sgqrcode API: {e}")
         return jsonify({"error": "Payment service is currently unavailable."}), 503
-    except (ValueError, KeyError, IndexError) as e:
-        logging.error(f"Failed to parse Guidesify API response: {e}")
-        return jsonify({"error": "Invalid response from payment service."}), 502
     except Exception as e:
         logging.error(f"PayNow QR generation failed: {e}")
         return jsonify({"error": f"Failed to generate QR code: {str(e)}"}), 500
