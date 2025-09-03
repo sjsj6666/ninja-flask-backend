@@ -307,4 +307,4 @@ def check_elitedias_msa_api(role_id):
     except Exception as e: return {"status": "error", "message": "API Error (EliteDias)"}
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=port, debug=True)```
+    app.run(host='0.0.0.0', port=port, debug=True)
