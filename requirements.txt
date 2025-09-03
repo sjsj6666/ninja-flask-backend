@@ -1,9 +1,8 @@
 Flask
 Flask-Cors
-requests
 supabase
+requests
+certifi
 gunicorn
-segno[pil]
+segno
 crcmod
-airwallex-sdk
-email-validator
