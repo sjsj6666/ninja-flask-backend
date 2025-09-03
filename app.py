@@ -90,36 +90,41 @@ def create_paynow_qr():
         return jsonify({'error': 'Amount and order_id are required.'}), 400
 
     try:
-        amount = float(data['amount'])
+        amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
+
         paynow_uen = os.environ.get('PAYNOW_UEN', '53506028m')
         company_name = os.environ.get('PAYNOW_COMPANY_NAME', 'GAMEBASE')
 
         sgqrcode_url = "https://sgpaynowqr.com/generate-paynow-qr"
         
-        form_data = {
-            'json': (None, json.dumps({
-                "payment_type": "uen",
-                "uen": paynow_uen,
-                "merchant_name": company_name,
-                "amount": amount,
-                "reference": order_id
-            }), 'application/json')
+        payload = {
+            "payment_type": "uen",
+            "uen": paynow_uen,
+            "merchant_name": company_name,
+            "amount": amount,
+            "reference": order_id
+        }
+        
+        files = {
+            'json': (None, json.dumps(payload), 'application/json')
         }
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Referer': 'https://sgpaynowqr.com/'
+            'Referer': 'https://sgpaynowqr.com/',
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json'
         }
         
-        response = requests.post(sgqrcode_url, files=form_data, headers=headers, verify=certifi.where())
+        response = requests.post(sgqrcode_url, files=files, headers=headers, verify=certifi.where())
         response.raise_for_status()
         
         response_data = response.json()
         qr_code_data_uri = response_data.get('qr_image')
 
         if not qr_code_data_uri:
-            raise ValueError("qr_image not found in sgpaynowqr.com API response")
+            raise ValueError("QR image data was not found in the API response.")
         
         return jsonify({
             'qr_code_data': qr_code_data_uri,
@@ -127,11 +132,11 @@ def create_paynow_qr():
         })
 
     except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to call sgpaynowqr API: {e}")
-        return jsonify({"error": "Payment service is currently unavailable."}), 503
+        logging.error(f"Failed to call PayNow QR API: {e}")
+        return jsonify({"error": "Payment QR service is currently unavailable. Please try again later."}), 503
     except Exception as e:
-        logging.error(f"PayNow QR generation failed: {e}")
-        return jsonify({"error": f"Failed to generate QR code: {str(e)}"}), 500
+        logging.error(f"PayNow QR code generation failed: {e}")
+        return jsonify({"error": f"A server error occurred while generating the QR code: {str(e)}"}), 500
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
