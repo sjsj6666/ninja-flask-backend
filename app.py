@@ -5,7 +5,7 @@ import uuid
 import json
 import base64
 import requests
-import certifi
+import certifi  # Make sure this import is present
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -29,6 +29,7 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise ValueError("CRITICAL: Supabase credentials must be set.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+# All your other existing API configurations remain the same
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -59,6 +60,7 @@ ELITEDIAS_MSA_VALIDATE_URL = "https://api.elitedias.com/checkid"
 ELITEDIAS_MSA_GAME_ID = "metal_slug"
 ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8"}
 MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
+
 
 @app.route('/')
 def home():
@@ -117,7 +119,9 @@ def create_paynow_qr():
             'Accept': 'application/json'
         }
         
+        # THIS LINE CONTAINS THE FIX
         response = requests.post(sgqrcode_url, files=files, headers=headers, verify=certifi.where())
+        
         response.raise_for_status()
         
         response_data = response.json()
@@ -137,6 +141,7 @@ def create_paynow_qr():
     except Exception as e:
         logging.error(f"PayNow QR code generation failed: {e}")
         return jsonify({"error": f"A server error occurred while generating the QR code: {str(e)}"}), 500
+
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
