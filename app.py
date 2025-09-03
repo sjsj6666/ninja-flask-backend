@@ -3,7 +3,7 @@ import logging
 import time
 import uuid
 import json
-import base64 # Import the base64 library
+import base64
 import requests
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -95,11 +95,9 @@ def create_paynow_qr():
         paynow_uen = os.environ.get('PAYNOW_UEN', '53506028m')
         company_name = os.environ.get('PAYNOW_COMPANY_NAME', 'GAMEBASE')
 
-        # Set an expiry time (e.g., 10 minutes from now)
         expiry_time = datetime.now() + timedelta(minutes=10)
         expiry_str = expiry_time.strftime('%Y/%m/%d %H:%M')
 
-        # Build the URL for the new API
         sgqrcode_url = "https://www.sgqrcode.com/paynow"
         params = {
             'uen': paynow_uen,
@@ -109,16 +107,18 @@ def create_paynow_qr():
             'ref_id': order_id,
             'company': company_name
         }
-
-        # Make the GET request to fetch the image directly
-        response = requests.get(sgqrcode_url, params=params)
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Referer': 'https://www.sgqrcode.com/'
+        }
+        
+        response = requests.get(sgqrcode_url, params=params, headers=headers)
         response.raise_for_status()
 
-        # Get the raw image content and encode it in Base64
         image_bytes = response.content
         base64_encoded_data = base64.b64encode(image_bytes).decode('utf-8')
         
-        # Create the full data URI for the image
         qrcode_data_uri = f"data:image/png;base64,{base64_encoded_data}"
         
         return jsonify({
@@ -171,6 +171,8 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
+
+
 
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
     endpoints = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "honkaistarrail": "https://www.smile.one/br/merchant/honkai/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/", "bigolive": "https://www.smile.one/sg/merchant/bigo/checkrole"}
