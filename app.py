@@ -4,8 +4,11 @@ import time
 import uuid
 import json
 import base64
+import io
 import requests
-import certifi  # Make sure this import is present
+import certifi
+import segno
+import crcmod
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -29,7 +32,6 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise ValueError("CRITICAL: Supabase credentials must be set.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-# All your other existing API configurations remain the same
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -61,10 +63,70 @@ ELITEDIAS_MSA_GAME_ID = "metal_slug"
 ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8"}
 MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 
-
 @app.route('/')
 def home():
     return "NinjaTopUp API Backend is Live!"
+
+@app.route('/create-paynow-qr', methods=['POST'])
+def create_paynow_qr():
+    data = request.get_json()
+    if not data or 'amount' not in data or 'order_id' not in data:
+        return jsonify({'error': 'Amount and order_id are required.'}), 400
+
+    try:
+        amount = f"{float(data['amount']):.2f}"
+        order_id = str(data['order_id'])
+        paynow_uen = os.environ.get('PAYNOW_UEN', '53506028m')
+        company_name = os.environ.get('PAYNOW_COMPANY_NAME', 'GAMEBASE')
+
+        def format_field(field_id, value):
+            return f"{field_id}{len(value):02d}{value}"
+
+        merchant_info = (
+            format_field("00", "SG.PAYNOW") +
+            format_field("01", "2") +
+            format_field("02", paynow_uen) +
+            format_field("03", "0")
+        )
+
+        additional_data = format_field("01", order_id)
+
+        payload_parts = [
+            format_field("00", "01"),
+            format_field("01", "11"),
+            format_field("26", merchant_info),
+            format_field("52", "0000"),
+            format_field("53", "702"),
+            format_field("54", amount),
+            format_field("58", "SG"),
+            format_field("59", company_name),
+            format_field("62", additional_data),
+            "6304"
+        ]
+        payload_for_crc = "".join(payload_parts)
+
+        crc16 = crcmod.predefined.mkPredefinedCrcFun('crc-16-buypass')
+        checksum = f"{crc16(payload_for_crc.encode()):04X}"
+
+        full_payload = payload_for_crc + checksum
+        
+        buffer = io.BytesIO()
+        qrcode = segno.make(full_payload, error='h')
+        qrcode.save(buffer, kind='png', scale=10)
+        
+        encoded_string = base64.b64encode(buffer.getvalue()).decode()
+        qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
+        
+        logging.info(f"Successfully generated PayNow QR for order: {order_id}")
+        
+        return jsonify({
+            'qr_code_data': qr_code_data_uri,
+            'message': 'QR code generated successfully.'
+        })
+
+    except Exception as e:
+        logging.error(f"PayNow QR code generation failed: {e}")
+        return jsonify({"error": f"A server error occurred while generating the QR code: {str(e)}"}), 500
 
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
@@ -84,64 +146,6 @@ def get_rates():
         return jsonify({"error": data.get('error-type', 'Unknown API error')}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@app.route('/create-paynow-qr', methods=['POST'])
-def create_paynow_qr():
-    data = request.get_json()
-    if not data or 'amount' not in data or 'order_id' not in data:
-        return jsonify({'error': 'Amount and order_id are required.'}), 400
-
-    try:
-        amount = f"{float(data['amount']):.2f}"
-        order_id = str(data['order_id'])
-
-        paynow_uen = os.environ.get('PAYNOW_UEN', '53506028m')
-        company_name = os.environ.get('PAYNOW_COMPANY_NAME', 'GAMEBASE')
-
-        sgqrcode_url = "https://sgpaynowqr.com/generate-paynow-qr"
-        
-        payload = {
-            "payment_type": "uen",
-            "uen": paynow_uen,
-            "merchant_name": company_name,
-            "amount": amount,
-            "reference": order_id
-        }
-        
-        files = {
-            'json': (None, json.dumps(payload), 'application/json')
-        }
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Referer': 'https://sgpaynowqr.com/',
-            'X-Requested-With': 'XMLHttpRequest',
-            'Accept': 'application/json'
-        }
-        
-        # THIS LINE CONTAINS THE FIX
-        response = requests.post(sgqrcode_url, files=files, headers=headers, verify=certifi.where())
-        
-        response.raise_for_status()
-        
-        response_data = response.json()
-        qr_code_data_uri = response_data.get('qr_image')
-
-        if not qr_code_data_uri:
-            raise ValueError("QR image data was not found in the API response.")
-        
-        return jsonify({
-            'qr_code_data': qr_code_data_uri,
-            'message': 'QR code generated successfully.'
-        })
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to call PayNow QR API: {e}")
-        return jsonify({"error": "Payment QR service is currently unavailable. Please try again later."}), 503
-    except Exception as e:
-        logging.error(f"PayNow QR code generation failed: {e}")
-        return jsonify({"error": f"A server error occurred while generating the QR code: {str(e)}"}), 500
-
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
@@ -314,4 +318,5 @@ def check_elitedias_msa_api(role_id):
     except Exception as e: return {"status": "error", "message": "API Error (EliteDias)"}
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=port, debug=False)
+    
