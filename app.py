@@ -7,12 +7,9 @@ import base64
 import io
 import requests
 import certifi
-import segno
-import crcmod
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
-from urllib.parse import quote
 
 app = Flask(__name__)
 
@@ -31,7 +28,7 @@ port = int(os.environ.get("PORT", 10000))
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-    raise ValueError("CRITICAL: Supabase credentials (URL and Service Key) must be set as environment variables.")
+    raise ValueError("CRITICAL: Supabase credentials must be set as environment variables.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 # --- API Headers & Constants ---
@@ -71,13 +68,14 @@ MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 
 @app.route('/')
 def home():
-    """ A simple health check endpoint. """
-    return "NinjaTopUp API Backend is Live and Running!"
+    return "NinjaTopUp API Backend is Live!"
 
 @app.route('/create-paynow-qr', methods=['POST'])
 def create_paynow_qr():
     """
-    Generates a SGQR-compliant, dynamic PayNow QR code for e-commerce transactions.
+    Generates a PayNow QR code by proxying the request to a third-party service.
+    WARNING: This creates a critical dependency on an external, unofficial service.
+             This is NOT recommended for production use.
     """
     data = request.get_json()
     if not data or 'amount' not in data or 'order_id' not in data:
@@ -86,88 +84,74 @@ def create_paynow_qr():
     try:
         amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
+
+        paynow_uen = os.environ.get('PAYNOW_UEN')
+        company_name = os.environ.get('PAYNOW_COMPANY_NAME')
+
+        if not paynow_uen or not company_name:
+            raise ValueError("PAYNOW_UEN and PAYNOW_COMPANY_NAME must be set in the environment.")
+
+        third_party_url = "https://sgpaynowqr.com/generate-paynow-qr"
+
+        form_data = {
+            'payment_type': 'uen',
+            'uen': paynow_uen,
+            'mobile': '',
+            'merchant_name': company_name,
+            'amount': amount,
+            'reference': order_id,
+            'qr_color': '000000',
+            'qr_size': '500'
+        }
         
-        paynow_uen = os.environ.get('PAYNOW_UEN', '53506028M') 
-        company_name = os.environ.get('PAYNOW_COMPANY_NAME', 'GAMEBASE')
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+            'Origin': 'https://sgpaynowqr.com',
+            'Referer': 'https://sgpaynowqr.com/generate-paynow-qr'
+        }
 
-        def format_field(field_id, value):
-            """Formats a field according to the EMV QR Code specification."""
-            return f"{field_id}{len(value):02d}{value}"
+        logging.info(f"Proxying QR request for order {order_id} to {third_party_url}")
 
-        merchant_info = (
-            format_field("00", "SG.PAYNOW") +
-            format_field("01", "2") +
-            format_field("02", paynow_uen) +
-            format_field("03", "1")
-        )
+        response = requests.post(third_party_url, data=form_data, headers=headers, timeout=15)
+        response.raise_for_status()
 
-        additional_data = format_field("01", order_id)
+        api_response_data = response.json()
 
-        payload_parts = [
-            format_field("00", "01"),
-            format_field("01", "12"),
-            format_field("26", merchant_info),
-            format_field("52", "0000"),
-            format_field("53", "702"),
-            format_field("54", amount),
-            format_field("58", "SG"),
-            format_field("59", company_name),
-            format_field("62", additional_data),
-            "6304"
-        ]
-        payload_for_crc = "".join(payload_parts)
+        if api_response_data.get("success") and api_response_data.get("qr_image"):
+            logging.info(f"Successfully received QR image from third-party for order: {order_id}")
+            return jsonify({
+                'qr_code_data': api_response_data['qr_image'],
+                'message': 'QR code generated successfully via third-party service.'
+            })
+        else:
+            error_message = api_response_data.get("message", "Unknown error from third-party QR generator.")
+            logging.error(f"Third-party QR service failed for order {order_id}: {error_message}")
+            return jsonify({'error': error_message}), 502
 
-        crc16 = crcmod.predefined.mkPredefinedCrcFun('crc-16-buypass')
-        checksum = f"{crc16(payload_for_crc.encode()):04X}"
-
-        full_payload = payload_for_crc + checksum
-        
-        buffer = io.BytesIO()
-        qrcode = segno.make(full_payload, error='h')
-        qrcode.save(buffer, kind='png', scale=10)
-        
-        encoded_string = base64.b64encode(buffer.getvalue()).decode()
-        qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
-        
-        logging.info(f"Successfully generated scannable PayNow QR for order: {order_id}")
-        
-        return jsonify({
-            'qr_code_data': qr_code_data_uri,
-            'message': 'QR code generated successfully.'
-        })
-
+    except requests.RequestException as e:
+        logging.error(f"Failed to connect to the third-party QR service: {e}")
+        return jsonify({"error": f"Could not connect to the QR code generation service."}), 504
     except Exception as e:
-        logging.error(f"PayNow QR code generation failed: {e}")
-        return jsonify({"error": f"A server error occurred while generating the QR code: {str(e)}"}), 500
+        logging.error(f"An unexpected error occurred during QR proxy: {e}")
+        return jsonify({"error": f"A server error occurred: {str(e)}"}), 500
 
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
-    """ Fetches the latest currency exchange rates from an external API. """
     try:
         response = supabase.table('site_settings').select('setting_value').eq('setting_key', 'exchangerate_api_key').single().execute()
         api_key_data = response.data
         if not api_key_data or not api_key_data.get('setting_value'):
-            logging.error("ExchangeRate-API key is not configured in site_settings table.")
-            return jsonify({"error": "Currency service API key is not configured."}), 500
+            return jsonify({"error": "Currency service API key missing."}), 500
         
         API_KEY = api_key_data['setting_value']
         url = f"https://v6.exchangerate-api.com/v6/{API_KEY}/latest/SGD"
-        
         api_response = requests.get(url, timeout=10, verify=certifi.where())
         api_response.raise_for_status()
-        
         data = api_response.json()
         if data.get('result') == 'success':
             return jsonify(data.get('conversion_rates', {}))
-        
-        logging.error(f"ExchangeRate-API returned an error: {data.get('error-type')}")
         return jsonify({"error": data.get('error-type', 'Unknown API error')}), 400
-
-    except requests.RequestException as e:
-        logging.error(f"Could not connect to ExchangeRate-API: {e}")
-        return jsonify({"error": f"Could not connect to currency service: {str(e)}"}), 503
     except Exception as e:
-        logging.error(f"An unexpected error occurred in get_rates: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
