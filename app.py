@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 app = Flask(__name__)
 
+# --- Configuration ---
 allowed_origins = [
     "http://127.0.0.1:5500",
     "http://localhost:5500",
@@ -24,14 +25,16 @@ allowed_origins = [
 CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-port = int(os.environ.get("PORT", 5001))
+port = int(os.environ.get("PORT", 10000))
 
+# --- Supabase Client Initialization ---
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-    raise ValueError("CRITICAL: Supabase credentials must be set.")
+    raise ValueError("CRITICAL: Supabase credentials (URL and Service Key) must be set as environment variables.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+# --- API Headers & Constants ---
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/javascript, */*; q=0.01",
@@ -63,12 +66,19 @@ ELITEDIAS_MSA_GAME_ID = "metal_slug"
 ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8"}
 MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 
+
+# --- Flask Routes ---
+
 @app.route('/')
 def home():
-    return "NinjaTopUp API Backend is Live!"
+    """ A simple health check endpoint. """
+    return "NinjaTopUp API Backend is Live and Running!"
 
 @app.route('/create-paynow-qr', methods=['POST'])
 def create_paynow_qr():
+    """
+    Generates a SGQR-compliant, dynamic PayNow QR code for e-commerce transactions.
+    """
     data = request.get_json()
     if not data or 'amount' not in data or 'order_id' not in data:
         return jsonify({'error': 'Amount and order_id are required.'}), 400
@@ -76,24 +86,26 @@ def create_paynow_qr():
     try:
         amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
-        paynow_uen = os.environ.get('PAYNOW_UEN', '53506028m')
+        
+        paynow_uen = os.environ.get('PAYNOW_UEN', '53506028M') 
         company_name = os.environ.get('PAYNOW_COMPANY_NAME', 'GAMEBASE')
 
         def format_field(field_id, value):
+            """Formats a field according to the EMV QR Code specification."""
             return f"{field_id}{len(value):02d}{value}"
 
         merchant_info = (
             format_field("00", "SG.PAYNOW") +
             format_field("01", "2") +
             format_field("02", paynow_uen) +
-            format_field("03", "0")
+            format_field("03", "1")
         )
 
         additional_data = format_field("01", order_id)
 
         payload_parts = [
             format_field("00", "01"),
-            format_field("01", "11"),
+            format_field("01", "12"),
             format_field("26", merchant_info),
             format_field("52", "0000"),
             format_field("53", "702"),
@@ -117,7 +129,7 @@ def create_paynow_qr():
         encoded_string = base64.b64encode(buffer.getvalue()).decode()
         qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
         
-        logging.info(f"Successfully generated PayNow QR for order: {order_id}")
+        logging.info(f"Successfully generated scannable PayNow QR for order: {order_id}")
         
         return jsonify({
             'qr_code_data': qr_code_data_uri,
@@ -130,21 +142,32 @@ def create_paynow_qr():
 
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
+    """ Fetches the latest currency exchange rates from an external API. """
     try:
         response = supabase.table('site_settings').select('setting_value').eq('setting_key', 'exchangerate_api_key').single().execute()
         api_key_data = response.data
         if not api_key_data or not api_key_data.get('setting_value'):
-            return jsonify({"error": "Currency service API key missing."}), 500
+            logging.error("ExchangeRate-API key is not configured in site_settings table.")
+            return jsonify({"error": "Currency service API key is not configured."}), 500
         
         API_KEY = api_key_data['setting_value']
         url = f"https://v6.exchangerate-api.com/v6/{API_KEY}/latest/SGD"
+        
         api_response = requests.get(url, timeout=10, verify=certifi.where())
         api_response.raise_for_status()
+        
         data = api_response.json()
         if data.get('result') == 'success':
             return jsonify(data.get('conversion_rates', {}))
+        
+        logging.error(f"ExchangeRate-API returned an error: {data.get('error-type')}")
         return jsonify({"error": data.get('error-type', 'Unknown API error')}), 400
+
+    except requests.RequestException as e:
+        logging.error(f"Could not connect to ExchangeRate-API: {e}")
+        return jsonify({"error": f"Could not connect to currency service: {str(e)}"}), 503
     except Exception as e:
+        logging.error(f"An unexpected error occurred in get_rates: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
@@ -319,4 +342,3 @@ def check_elitedias_msa_api(role_id):
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
-    
