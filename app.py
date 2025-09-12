@@ -7,9 +7,12 @@ import base64
 import io
 import requests
 import certifi
+import segno
+import crcmod
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
+from urllib.parse import quote
 
 app = Flask(__name__)
 
@@ -73,9 +76,8 @@ def home():
 @app.route('/create-paynow-qr', methods=['POST'])
 def create_paynow_qr():
     """
-    Generates a PayNow QR code by proxying the request to a third-party service.
-    WARNING: This creates a critical dependency on an external, unofficial service.
-             This is NOT recommended for production use.
+    Generates a SGQR-compliant, dynamic PayNow QR code locally.
+    This is the reliable and recommended method.
     """
     data = request.get_json()
     if not data or 'amount' not in data or 'order_id' not in data:
@@ -85,55 +87,62 @@ def create_paynow_qr():
         amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
 
+        # CRITICAL: These MUST be set in your Render.com Environment variables
         paynow_uen = os.environ.get('PAYNOW_UEN')
         company_name = os.environ.get('PAYNOW_COMPANY_NAME')
 
         if not paynow_uen or not company_name:
-            raise ValueError("PAYNOW_UEN and PAYNOW_COMPANY_NAME must be set in the environment.")
+             raise ValueError("PAYNOW_UEN and PAYNOW_COMPANY_NAME environment variables must be set.")
 
-        third_party_url = "https://sgpaynowqr.com/generate-paynow-qr"
+        def format_field(field_id, value):
+            return f"{field_id}{len(value):02d}{value}"
 
-        form_data = {
-            'payment_type': 'uen',
-            'uen': paynow_uen,
-            'mobile': '',
-            'merchant_name': company_name,
-            'amount': amount,
-            'reference': order_id,
-            'qr_color': '000000',
-            'qr_size': '500'
-        }
+        merchant_info = (
+            format_field("00", "SG.PAYNOW") +
+            format_field("01", "2") +
+            format_field("02", paynow_uen) +
+            format_field("03", "1")
+        )
+
+        additional_data = format_field("01", order_id)
+
+        payload_parts = [
+            format_field("00", "01"),
+            format_field("01", "12"),
+            format_field("26", merchant_info),
+            format_field("52", "0000"),
+            format_field("53", "702"),
+            format_field("54", amount),
+            format_field("58", "SG"),
+            format_field("59", company_name),
+            format_field("62", additional_data),
+            "6304"
+        ]
+        payload_for_crc = "".join(payload_parts)
+
+        crc16 = crcmod.predefined.mkPredefinedCrcFun('crc-16-buypass')
+        checksum = f"{crc16(payload_for_crc.encode()):04X}"
+
+        full_payload = payload_for_crc + checksum
         
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
-            'Origin': 'https://sgpaynowqr.com',
-            'Referer': 'https://sgpaynowqr.com/generate-paynow-qr'
-        }
+        buffer = io.BytesIO()
+        qrcode = segno.make(full_payload, error='h')
+        qrcode.save(buffer, kind='png', scale=10)
+        
+        encoded_string = base64.b64encode(buffer.getvalue()).decode()
+        qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
+        
+        logging.info(f"Successfully generated self-contained PayNow QR for order: {order_id}")
+        
+        return jsonify({
+            'qr_code_data': qr_code_data_uri,
+            'message': 'QR code generated successfully.'
+        })
 
-        logging.info(f"Proxying QR request for order {order_id} to {third_party_url}")
-
-        response = requests.post(third_party_url, data=form_data, headers=headers, timeout=15)
-        response.raise_for_status()
-
-        api_response_data = response.json()
-
-        if api_response_data.get("success") and api_response_data.get("qr_image"):
-            logging.info(f"Successfully received QR image from third-party for order: {order_id}")
-            return jsonify({
-                'qr_code_data': api_response_data['qr_image'],
-                'message': 'QR code generated successfully via third-party service.'
-            })
-        else:
-            error_message = api_response_data.get("message", "Unknown error from third-party QR generator.")
-            logging.error(f"Third-party QR service failed for order {order_id}: {error_message}")
-            return jsonify({'error': error_message}), 502
-
-    except requests.RequestException as e:
-        logging.error(f"Failed to connect to the third-party QR service: {e}")
-        return jsonify({"error": f"Could not connect to the QR code generation service."}), 504
     except Exception as e:
-        logging.error(f"An unexpected error occurred during QR proxy: {e}")
-        return jsonify({"error": f"A server error occurred: {str(e)}"}), 500
+        logging.error(f"PayNow QR code generation failed: {e}")
+        return jsonify({"error": f"A server error occurred while generating the QR code: {str(e)}"}), 500
+
 
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
