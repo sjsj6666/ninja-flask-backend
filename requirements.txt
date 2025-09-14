@@ -5,3 +5,4 @@ requests
 certifi
 gunicorn
 beautifulsoup4
+pycountry
