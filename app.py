@@ -90,9 +90,14 @@ def create_paynow_qr():
         maybank_url = "https://sslsecure.maybank.com.sg/scripts/mbb_qrcode/mbb_qrcode.jsp"
         expiry_date = (datetime.now() + timedelta(days=1)).strftime('%Y%m%d')
         params = {
-            'proxyValue': paynow_uen, 'proxyType': 'UEN', 'merchantName': company_name,
-            'amount': amount, 'reference': order_id, 'amountInd': 'N',
-            'expiryDate': expiry_date, 'rnd': random.random()
+            'proxyValue': paynow_uen,
+            'proxyType': 'UEN',
+            'merchantName': company_name,
+            'amount': amount,
+            'reference': order_id,
+            'amountInd': 'N',
+            'expiryDate': expiry_date,
+            'rnd': random.random()
         }
         headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
@@ -130,52 +135,34 @@ def check_ml_region():
     zone_id = data['zoneId']
 
     try:
-        with requests.Session() as s:
-            s.headers.update({
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0'
-            })
-            checker_url = 'https://pizzoshop.com/mlchecker'
-            logging.info(f"Step 1: Visiting {checker_url} to get session cookie.")
-            s.get(checker_url, timeout=10)
+        api_url = "https://cekidml.caliph.dev/api/validasi"
+        params = {'id': user_id, 'serverid': zone_id}
+        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0'}
+        
+        logging.info(f"Sending request to caliph.dev API with params: {params}")
+        response = requests.get(api_url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        response_data = response.json()
+
+        if response_data.get("status") == "success" and response_data.get("result"):
+            nickname = response_data["result"].get("nickname")
+            country = response_data["result"].get("country")
+            if not nickname or not country:
+                raise ValueError("API response missing nickname or country.")
             
-            form_payload = {'user_id': user_id, 'zone_id': zone_id}
-            submit_url = 'https://pizzoshop.com/mlchecker/check'
-            logging.info(f"Step 2: Posting data to {submit_url}")
-            response = s.post(submit_url, data=form_payload, timeout=10)
-            response.raise_for_status()
-
-            logging.info("Step 3: Parsing HTML response.")
-            soup = BeautifulSoup(response.text, 'html.parser')
-
-            success_header = soup.find('h4', class_='text-success', string=lambda t: t and 'Account found' in t)
-            if not success_header:
-                logging.warning(f"Could not find success message for ID {user_id}|{zone_id}")
-                return jsonify({'status': 'error', 'message': 'Invalid User ID or Zone ID.'}), 400
-
-            table = success_header.find_next('table')
-            if not table: raise ValueError("HTML structure changed: Could not find results table.")
-
-            details = {}
-            rows = table.find_all('tr')
-            for row in rows:
-                header = row.find('th')
-                value = row.find('td')
-                if header and value:
-                    key = header.text.strip().lower().replace(' ', '_')
-                    details[key] = value.text.strip()
-            
-            username = details.get('nickname')
-            region = details.get('region_id')
-            if not username or not region: raise ValueError("Could not extract username or region from the table.")
-
-            logging.info(f"Successfully found data: Nickname='{username}', Region='{region}'")
-            return jsonify({'status': 'success', 'username': username, 'region': region})
+            logging.info(f"Successfully validated MLBB ID. Nickname: {nickname}, Region: {country}")
+            return jsonify({'status': 'success', 'username': nickname, 'region': country})
+        else:
+            error_message = response_data.get("message", "Invalid User ID or Zone ID.")
+            logging.error(f"caliph.dev validation failed: {error_message}")
+            return jsonify({'status': 'error', 'message': error_message}), 400
     except requests.exceptions.RequestException as e:
         logging.error(f"Failed to connect to the checking service: {e}")
         return jsonify({'status': 'error', 'message': 'Could not connect to the validation service.'}), 503
     except Exception as e:
         logging.error(f"An unexpected error occurred during ML region check: {e}")
-        return jsonify({'status': 'error', 'message': f'An unexpected server error occurred: {e}'}), 500
+        return jsonify({'status': 'error', 'message': 'An unexpected server error occurred.'}), 500
 
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
