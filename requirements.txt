@@ -4,3 +4,4 @@ supabase
 requests
 certifi
 gunicorn
+beautifulsoup4
