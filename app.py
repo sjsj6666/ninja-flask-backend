@@ -6,6 +6,7 @@ import json
 import base64
 import requests
 import certifi
+import pycountry
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
@@ -137,7 +138,7 @@ def check_ml_region():
     try:
         api_url = "https://cekidml.caliph.dev/api/validasi"
         params = {'id': user_id, 'serverid': zone_id}
-        headers = {'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         
         logging.info(f"Sending request to caliph.dev API with params: {params}")
         response = requests.get(api_url, params=params, headers=headers, timeout=10)
@@ -147,16 +148,33 @@ def check_ml_region():
 
         if response_data.get("status") == "success" and response_data.get("result"):
             nickname = response_data["result"].get("nickname")
-            country = response_data["result"].get("country")
-            if not nickname or not country:
+            country_name = response_data["result"].get("country")
+            
+            if not nickname or not country_name:
                 raise ValueError("API response missing nickname or country.")
             
-            logging.info(f"Successfully validated MLBB ID. Nickname: {nickname}, Region: {country}")
-            return jsonify({'status': 'success', 'username': nickname, 'region': country})
+            country_code = ""
+            try:
+                country_object = pycountry.countries.get(name=country_name)
+                if country_object:
+                    country_code = country_object.alpha_2
+                else:
+                    logging.warning(f"Could not find country code for: {country_name}")
+            except Exception as e:
+                logging.error(f"Error during pycountry lookup for '{country_name}': {e}")
+
+            logging.info(f"Successfully validated MLBB ID. Nickname: {nickname}, Country: {country_name}, Code: {country_code}")
+            
+            return jsonify({
+                'status': 'success',
+                'username': nickname,
+                'region': country_code
+            })
         else:
             error_message = response_data.get("message", "Invalid User ID or Zone ID.")
             logging.error(f"caliph.dev validation failed: {error_message}")
             return jsonify({'status': 'error', 'message': error_message}), 400
+            
     except requests.exceptions.RequestException as e:
         logging.error(f"Failed to connect to the checking service: {e}")
         return jsonify({'status': 'error', 'message': 'Could not connect to the validation service.'}), 503
