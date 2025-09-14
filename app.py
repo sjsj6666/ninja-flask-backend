@@ -9,13 +9,9 @@ import certifi
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from supabase import create_client, Client
+from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 import random
-
-# Suppress the InsecureRequestWarning if needed, although verify=True is used
-import urllib3
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 
 app = Flask(__name__)
 
@@ -78,10 +74,6 @@ def home():
 
 @app.route('/create-paynow-qr', methods=['POST'])
 def create_paynow_qr():
-    """
-    Generates a PayNow QR code by proxying the request to the official Maybank generator.
-    This ensures a correctly branded and scannable SGQR code.
-    """
     data = request.get_json()
     if not data or 'amount' not in data or 'order_id' not in data:
         return jsonify({'error': 'Amount and order_id are required.'}), 400
@@ -89,7 +81,6 @@ def create_paynow_qr():
     try:
         amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
-
         paynow_uen = os.environ.get('PAYNOW_UEN')
         company_name = os.environ.get('PAYNOW_COMPANY_NAME')
 
@@ -97,36 +88,24 @@ def create_paynow_qr():
             raise ValueError("PAYNOW_UEN and PAYNOW_COMPANY_NAME environment variables must be set.")
 
         maybank_url = "https://sslsecure.maybank.com.sg/scripts/mbb_qrcode/mbb_qrcode.jsp"
-        
         expiry_date = (datetime.now() + timedelta(days=1)).strftime('%Y%m%d')
-
         params = {
-            'proxyValue': paynow_uen,
-            'proxyType': 'UEN',
-            'merchantName': company_name,
-            'amount': amount,
-            'reference': order_id,
-            'amountInd': 'N',
-            'expiryDate': expiry_date,
-            'rnd': random.random()
+            'proxyValue': paynow_uen, 'proxyType': 'UEN', 'merchantName': company_name,
+            'amount': amount, 'reference': order_id, 'amountInd': 'N',
+            'expiryDate': expiry_date, 'rnd': random.random()
         }
-
         headers = {
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
             'Referer': 'https://sslsecure.maybank.com.sg/'
         }
-
         logging.info(f"Proxying QR request for order {order_id} to Maybank endpoint.")
-
         response = requests.get(maybank_url, params=params, headers=headers, timeout=20, verify=True)
         response.raise_for_status()
 
         if 'image/png' in response.headers.get('Content-Type', ''):
             encoded_string = base64.b64encode(response.content).decode('utf-8')
             qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
-
             logging.info(f"Successfully received branded QR image from Maybank for order: {order_id}")
-            
             return jsonify({
                 'qr_code_data': qr_code_data_uri,
                 'message': 'QR code generated successfully via Maybank service.'
@@ -134,13 +113,69 @@ def create_paynow_qr():
         else:
             logging.error(f"Maybank service did not return an image for order {order_id}. Response: {response.text}")
             return jsonify({'error': 'Received an invalid response from the QR generation service.'}), 502
-
     except requests.exceptions.RequestException as e:
         logging.error(f"Failed to connect to the Maybank QR service: {e}")
         return jsonify({"error": "Could not connect to the QR code generation service."}), 504
     except Exception as e:
         logging.error(f"An unexpected error occurred during QR proxy: {e}")
         return jsonify({"error": f"A server error occurred: {str(e)}"}), 500
+
+@app.route('/check-ml-region', methods=['POST'])
+def check_ml_region():
+    data = request.get_json()
+    if not data or 'userId' not in data or 'zoneId' not in data:
+        return jsonify({'status': 'error', 'message': 'User ID and Zone ID are required.'}), 400
+
+    user_id = data['userId']
+    zone_id = data['zoneId']
+
+    try:
+        with requests.Session() as s:
+            s.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0'
+            })
+            checker_url = 'https://pizzoshop.com/mlchecker'
+            logging.info(f"Step 1: Visiting {checker_url} to get session cookie.")
+            s.get(checker_url, timeout=10)
+            
+            form_payload = {'user_id': user_id, 'zone_id': zone_id}
+            submit_url = 'https://pizzoshop.com/mlchecker/check'
+            logging.info(f"Step 2: Posting data to {submit_url}")
+            response = s.post(submit_url, data=form_payload, timeout=10)
+            response.raise_for_status()
+
+            logging.info("Step 3: Parsing HTML response.")
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            success_header = soup.find('h4', class_='text-success', string=lambda t: t and 'Account found' in t)
+            if not success_header:
+                logging.warning(f"Could not find success message for ID {user_id}|{zone_id}")
+                return jsonify({'status': 'error', 'message': 'Invalid User ID or Zone ID.'}), 400
+
+            table = success_header.find_next('table')
+            if not table: raise ValueError("HTML structure changed: Could not find results table.")
+
+            details = {}
+            rows = table.find_all('tr')
+            for row in rows:
+                header = row.find('th')
+                value = row.find('td')
+                if header and value:
+                    key = header.text.strip().lower().replace(' ', '_')
+                    details[key] = value.text.strip()
+            
+            username = details.get('nickname')
+            region = details.get('region_id')
+            if not username or not region: raise ValueError("Could not extract username or region from the table.")
+
+            logging.info(f"Successfully found data: Nickname='{username}', Region='{region}'")
+            return jsonify({'status': 'success', 'username': username, 'region': region})
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to connect to the checking service: {e}")
+        return jsonify({'status': 'error', 'message': 'Could not connect to the validation service.'}), 503
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during ML region check: {e}")
+        return jsonify({'status': 'error', 'message': f'An unexpected server error occurred: {e}'}), 500
 
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
