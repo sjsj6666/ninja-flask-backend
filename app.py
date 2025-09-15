@@ -67,7 +67,7 @@ ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/jso
 MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
 
 
-# --- Helper Functions for ID Validation ---
+# --- Reusable Helper Functions for ID Validation ---
 
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
     endpoints = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "honkaistarrail": "https://www.smile.one/br/merchant/honkai/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/", "bigolive": "https://www.smile.one/sg/merchant/bigo/checkrole"}
@@ -96,28 +96,95 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
         if data.get("code") == 200:
             name_key = "username" if game_code_for_smileone == "mobilelegends" else "message" if game_code_for_smileone == "bigolive" else "nickname"
             username = data.get(name_key)
-            if username and isinstance(username, str) and username.strip(): return {"status": "success", "username": username.strip()}
-            return {"status": "error", "message": "Username not found in API response"}
-        return {"status": "error", "message": data.get("message", f"API error (Code: {data.get('code')})")}
-    except Exception as e:
-        logging.error(f"SmileOne API Error for {game_code_for_smileone}: {e}")
-        return {"status": "error", "message": "Validation service failed"}
+            if not username or not isinstance(username, str) or not username.strip():
+                for alt_key in ["username", "nickname", "role_name", "name", "char_name", "message"]:
+                    if alt_key == name_key: continue
+                    username = data.get(alt_key)
+                    if username and isinstance(username, str) and username.strip(): break
+            if username and username.strip(): return {"status": "success", "username": username.strip()}
+            if game_code_for_smileone in ["honkaistarrail", "bloodstrike", "ragnarokmclassic"]: return {"status": "success", "message": "Account Verified (Username N/A from API)"}
+            return {"status": "error", "message": "Username not found in API response (Code 200)"}
+        return {"status": "error", "message": data.get("message", data.get("info", f"API error (Code: {data.get('code')})"))}
+    except ValueError:
+        if game_code_for_smileone == "loveanddeepspace" and "<span class=\"name\">" in raw_text and "uid_error_tips" not in raw_text:
+            try:
+                start_idx = raw_text.find("<span class=\"name\">") + len("<span class=\"name\">"); end_idx = raw_text.find("</span>", start_idx)
+                if start_idx > len("<span class=\"name\">") -1 and end_idx != -1:
+                    username_from_html = raw_text[start_idx:end_idx].strip()
+                    if username_from_html: return {"status": "success", "username": username_from_html}
+            except Exception as ex_parse: logging.error(f"HTML parse error for L&D: {ex_parse}")
+        return {"status": "error", "message": "Invalid API response format (Not JSON)"}
+    except requests.RequestException as e: return {"status": "error", "message": f"API Connection Error (Status: {getattr(e.response, 'status_code', 'N/A')})"}
+    except Exception as e_unexp: return {"status": "error", "message": "Unexpected server error (SmileOne)"}
 
 def check_identityv_api(server_frontend_key, roleid):
-    # This function is unchanged
-    pass
+    server_code = IDV_SERVER_CODES.get(server_frontend_key.lower())
+    if not server_code: return {"status": "error", "message": "Invalid server for Identity V."}
+    url = NETEASE_IDV_BASE_URL_TEMPLATE.format(server_code=server_code)
+    params = {"roleid": roleid, "timestamp": int(time.time() * 1000), "traceid": str(uuid.uuid4()), "deviceid": os.environ.get("NETEASE_DEVICE_ID"), **NETEASE_IDV_STATIC_PARAMS}
+    current_headers = NETEASE_IDV_HEADERS.copy(); current_headers["X-TASK-ID"] = f"transid={params['traceid']},uni_transaction_id=default"
+    logging.info(f"Sending Netease IDV: URL='{url}', Params={params}")
+    try:
+        response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        data = response.json()
+        api_code = data.get("code"); api_msg = (data.get("message", "") or data.get("msg", "")).strip()
+        if api_code == "0000":
+            username = data.get("data", {}).get("rolename")
+            if username and username.strip(): return {"status": "success", "username": username.strip()}
+            return {"status": "success", "message": "Role Verified"} if "ok" in api_msg.lower() or "success" in api_msg.lower() else {"status": "error", "message": f"Player found, but username unavailable ({api_msg or 'No details'})"}
+        if "role not exist" in api_msg.lower() or api_code == "40004": return {"status": "error", "message": "Invalid Role ID for this server"}
+        return {"status": "error", "message": f"Invalid Role ID or API Error ({api_msg or 'No details'}, Code: {api_code})"}
+    except Exception: return {"status": "error", "message": "Unexpected server error (IDV)"}
 
 def check_razer_api(game_slug, user_id, server_id_frontend_key):
-    # This function is unchanged
-    pass
+    api_details = {"genshin-impact": {"url_template": RAZER_GOLD_GENSHIN_API_URL_TEMPLATE, "headers": RAZER_GOLD_GENSHIN_HEADERS, "server_map": None, "name": "Genshin Impact"}, "zenless-zone-zero": {"url_template": RAZER_GOLD_ZZZ_API_URL_TEMPLATE, "headers": RAZER_GOLD_ZZZ_HEADERS, "server_map": RAZER_ZZZ_SERVER_ID_MAP, "name": "Zenless Zone Zero"}, "ragnarok-origin": {"url_template": RAZER_GOLD_RO_ORIGIN_API_URL_TEMPLATE, "headers": RAZER_GOLD_RO_ORIGIN_HEADERS, "server_map": None, "name": "Ragnarok Origin"}, "snowbreak": {"url_template": RAZER_GOLD_SNOWBREAK_API_URL_TEMPLATE, "headers": RAZER_GOLD_SNOWBREAK_HEADERS, "server_map": RAZER_SNOWBREAK_SERVER_ID_MAP, "name": "Snowbreak"}}
+    if game_slug not in api_details: return {"status": "error", "message": f"Razer API config not found for: {game_slug}"}
+    config = api_details[game_slug]; api_server_id_param_value = None
+    if config["server_map"]:
+        api_server_id_param_value = config["server_map"].get(server_id_frontend_key)
+        if not api_server_id_param_value: return {"status": "error", "message": f"Invalid server key for {config['name']}: '{server_id_frontend_key}'"}
+    elif game_slug in ["genshin-impact", "ragnarok-origin"]: api_server_id_param_value = server_id_frontend_key
+    url = config["url_template"].format(user_id=user_id)
+    params = {"serverId": api_server_id_param_value} if api_server_id_param_value else {}
+    logging.info(f"Sending Razer {config['name']}: URL='{url}', Params={params}")
+    try:
+        response = requests.get(url, params=params, headers=config["headers"], timeout=10, verify=certifi.where())
+        data = response.json()
+        if response.status_code == 200:
+            username = data.get("username") or data.get("name") if game_slug != "ragnarok-origin" else data.get("roles", [{}])[0].get("Name") if "roles" in data and data["roles"] else None
+            if username and isinstance(username, str) and username.strip(): return {"status": "success", "username": username.strip()}
+            return {"status": "error", "message": data.get("message", "Unknown success response format")}
+        return {"status": "error", "message": data.get("message", f"Razer API HTTP Error: {response.status_code}")}
+    except Exception: return {"status": "error", "message": f"Unexpected server error (Razer)"}
 
 def check_nuverse_rox_api(role_id):
-    # This function is unchanged
-    pass
+    params = {"tab": "purchase", "aid": NUVERSE_ROX_AID, "role_id": role_id}
+    headers = NUVERSE_ROX_HEADERS.copy()
+    headers["x-tea-payload"] = json.dumps({"role_id": role_id, "aid": NUVERSE_ROX_AID})
+    logging.info(f"Sending Nuverse ROX: URL='{NUVERSE_ROX_VALIDATE_URL}', Params={params}")
+    try:
+        response = requests.get(NUVERSE_ROX_VALIDATE_URL, params=params, headers=headers, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 0 and data.get("message", "").lower() == "success":
+            if "data" in data and data["data"]:
+                role_info = data["data"][0]; username = role_info.get("role_name")
+                if username: return {"status": "success", "username": username.strip()}
+            return {"status": "error", "message": "Role ID not found"}
+        return {"status": "error", "message": data.get("message", "Unknown error")}
+    except Exception: return {"status": "error", "message": "API Error (Nuverse)"}
 
 def check_elitedias_msa_api(role_id):
-    # This function is unchanged
-    pass
+    payload = {"game": ELITEDIAS_MSA_GAME_ID, "userid": str(role_id)}
+    logging.info(f"Sending EliteDias MSA: URL='{ELITEDIAS_MSA_VALIDATE_URL}', Payload='{json.dumps(payload)}'")
+    try:
+        response = requests.post(ELITEDIAS_MSA_VALIDATE_URL, json=payload, headers=ELITEDIAS_MSA_HEADERS, timeout=12, verify=certifi.where())
+        data = response.json()
+        if response.status_code == 200 and data.get("valid") == "valid":
+            username = data.get("username") or data.get("nickname") or data.get("name")
+            if username: return {"status": "success", "username": username.strip()}
+            return {"status": "success", "message": "Role ID Verified."}
+        return {"status": "error", "message": data.get("message", "Invalid Role ID (EliteDias).")}
+    except Exception: return {"status": "error", "message": "API Error (EliteDias)"}
 
 
 # --- Flask Routes ---
@@ -176,13 +243,12 @@ def check_ml_region():
                     try:
                         country_object = pycountry.countries.get(name=country_name)
                         if country_object: country_code = country_object.alpha_2
-                    except:
-                        pass
+                    except: pass
                     logging.info(f"Primary API Success! Nickname: {nickname}, Region: {country_code}")
                     return jsonify({'status': 'success', 'username': nickname, 'region': country_code}), 200
-        logging.warning("Primary API failed or returned invalid data. Proceeding to fallback.")
+        logging.warning("Primary API failed. Proceeding to fallback.")
     except Exception as e:
-        logging.error(f"Primary API (caliph.dev) exception: {e}. Proceeding to fallback.")
+        logging.error(f"Primary API exception: {e}. Proceeding to fallback.")
 
     # 2. Fallback API Attempt (Smile.One)
     logging.info(f"Attempting fallback API (Smile.One) for user: {user_id}")
@@ -207,12 +273,44 @@ def get_rates():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None}, methods=['GET'])
-@app.route('/check-id/<game_slug>/<uid>/<server_id>', methods=['GET'])
-def check_game_id(game_slug, uid, server_id):
-    # This entire route and its logic is preserved from your original file
-    # to handle all non-MLBB game validations.
-    pass
+@app.route('/check-id/<game_slug_from_frontend>/<uid>/', defaults={'server_id': None}, methods=['GET'])
+@app.route('/check-id/<game_slug_from_frontend>/<uid>/<server_id>', methods=['GET'])
+def check_game_id(game_slug_from_frontend, uid, server_id):
+    game_lower = game_slug_from_frontend.lower()
+    if not uid:
+        return jsonify({"status": "error", "message": "User ID/Role ID is required."}), 400
+
+    smileone_games_map = {
+        "honkai-star-rail": "honkaistarrail", "bloodstrike": "bloodstrike",
+        "ragnarok-m-classic": "ragnarokmclassic", "love-and-deepspace": "loveanddeepspace",
+        "bigo-live": "bigolive"
+    }
+    razer_games_map = {
+        "genshin-impact": "genshin-impact", "zenless-zone-zero": "zenless-zone-zero",
+        "ragnarok-origin": "ragnarok-origin", "snowbreak-containment-zone": "snowbreak"
+    }
+    game_handlers = {
+        "metal-slug-awakening": lambda: check_elitedias_msa_api(uid),
+        "ragnarok-x-next-generation": lambda: check_nuverse_rox_api(uid),
+        "mobile-legends-sg": lambda: check_smile_one_api("mobilelegends", uid, server_id, os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE")),
+        "mobile-legends": lambda: check_smile_one_api("mobilelegends", uid, server_id, "25"),
+        "identity-v": lambda: check_identityv_api(server_id, uid),
+    }
+
+    if game_lower in razer_games_map:
+        handler = lambda: check_razer_api(razer_games_map[game_lower], uid, server_id)
+    elif game_lower in smileone_games_map:
+        handler = lambda: check_smile_one_api(smileone_games_map[game_lower], uid, server_id)
+    else:
+        handler = game_handlers.get(game_lower)
+
+    if handler:
+        result = handler()
+    else:
+        result = {"status": "error", "message": f"Validation not configured for game: {game_slug_from_frontend}"}
+    
+    status_code = 200 if result.get("status") == "success" else 400
+    return jsonify(result), status_code
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
