@@ -7,7 +7,7 @@ import base64
 import requests
 import certifi
 import pycountry
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
 from supabase import create_client, Client
 from bs4 import BeautifulSoup
@@ -33,6 +33,10 @@ SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise ValueError("CRITICAL: Supabase credentials must be set as environment variables.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+# --- Your Website's Domain ---
+# !!! IMPORTANT: Replace this with your actual live domain name when you deploy !!!
+BASE_URL = "https://www.gameuniverse.co" 
 
 # --- API Headers & Constants ---
 SMILE_ONE_HEADERS = {
@@ -207,6 +211,48 @@ def check_elitedias_msa_api(role_id):
 def home():
     return "NinjaTopUp API Backend is Live!"
 
+@app.route('/sitemap.xml')
+def generate_sitemap():
+    try:
+        logging.info("Generating sitemap...")
+        response = supabase.from_('games').select('slug').eq('is_active', True).execute()
+        games = response.data
+        
+        static_pages = [
+            '/', '/about.html', '/contact.html', '/reviews.html',
+            '/past-transactions.html', '/faq.html', '/login.html', '/signup.html'
+        ]
+
+        xml_parts = []
+        xml_parts.append('<?xml version="1.0" encoding="UTF-8"?>')
+        xml_parts.append('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">')
+
+        for page in static_pages:
+            xml_parts.append('  <url>')
+            xml_parts.append(f'    <loc>{BASE_URL}{page}</loc>')
+            xml_parts.append('    <changefreq>weekly</changefreq>')
+            xml_parts.append('    <priority>0.8</priority>')
+            xml_parts.append('  </url>')
+
+        for game in games:
+            game_slug = game.get('slug')
+            if game_slug:
+                xml_parts.append('  <url>')
+                xml_parts.append(f'    <loc>{BASE_URL}/topup.html?game={game_slug}</loc>')
+                xml_parts.append('    <changefreq>monthly</changefreq>')
+                xml_parts.append('    <priority>0.9</priority>')
+                xml_parts.append('  </url>')
+        
+        xml_parts.append('</urlset>')
+        
+        xml_sitemap = "\n".join(xml_parts)
+        logging.info("Sitemap generated successfully.")
+        return Response(xml_sitemap, mimetype='application/xml')
+
+    except Exception as e:
+        logging.error(f"Sitemap generation error: {e}")
+        return jsonify({"error": "Could not generate sitemap"}), 500
+
 @app.route('/create-paynow-qr', methods=['POST'])
 def create_paynow_qr():
     data = request.get_json()
@@ -244,7 +290,6 @@ def check_ml_region():
     user_id = data['userId']
     zone_id = data['zoneId']
     
-    # 1. Primary API Attempt (caliph.dev for username + region)
     try:
         logging.info(f"Attempting primary API (caliph.dev) for user: {user_id}")
         api_url = "https://cekidml.caliph.dev/api/validasi"
@@ -267,13 +312,11 @@ def check_ml_region():
     except Exception as e:
         logging.error(f"Primary API exception: {e}. Proceeding to fallback.")
 
-    # 2. Fallback API Attempt (Smile.One)
     logging.info(f"Attempting fallback API (Smile.One) for user: {user_id}")
     fallback_result = check_smile_one_api("mobilelegends", user_id, zone_id)
     if fallback_result.get("status") == "success":
         fallback_result['region'] = 'N/A'
     
-    # Always return 200 OK, let the frontend decide based on the 'status' key
     return jsonify(fallback_result), 200
 
 @app.route('/get-rates', methods=['GET'])
