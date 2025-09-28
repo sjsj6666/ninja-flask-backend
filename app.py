@@ -35,7 +35,6 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 # --- Your Website's Domain ---
-# !!! IMPORTANT: Replace this with your actual live domain name when you deploy !!!
 BASE_URL = "https://www.gameuniverse.co" 
 
 # --- API Headers & Constants ---
@@ -65,10 +64,8 @@ RAZER_SNOWBREAK_SERVER_ID_MAP = {"sea": "215","asia": "225","americas": "235","e
 NUVERSE_ROX_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
 NUVERSE_ROX_AID = "3402"
 NUVERSE_ROX_HEADERS = {"User-Agent": "Mozilla/5.0"}
-ELITEDIAS_MSA_VALIDATE_URL = "https://api.elitedias.com/checkid"
-ELITEDIAS_MSA_GAME_ID = "metal_slug"
-ELITEDIAS_MSA_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8"}
-MSA_SERVER_ID_TO_NAME_MAP = {"49": "MSA SEA Server 49"}
+ELITEDIAS_CHECKID_URL = "https://api.elitedias.com/checkid"
+ELITEDIAS_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8", "Origin": "https://elitedias.com", "Referer": "https://elitedias.com/"}
 
 
 # --- Helper Functions for ID Validation ---
@@ -189,20 +186,27 @@ def check_nuverse_rox_api(role_id):
         return {"status": "error", "message": error_message}
     except Exception as e: return {"status": "error", "message": "API Error (Nuverse)"}
 
-def check_elitedias_msa_api(role_id):
-    payload = {"game": ELITEDIAS_MSA_GAME_ID, "userid": str(role_id)}
-    logging.info(f"Sending EliteDias MSA: URL='{ELITEDIAS_MSA_VALIDATE_URL}', Payload='{json.dumps(payload)}'")
+def check_elitedias_api(game_code_for_api, role_id):
+    payload = {"game": game_code_for_api, "userid": str(role_id)}
+    logging.info(f"Sending EliteDias API: URL='{ELITEDIAS_CHECKID_URL}', Payload='{json.dumps(payload)}'")
     try:
-        response = requests.post(ELITEDIAS_MSA_VALIDATE_URL, json=payload, headers=ELITEDIAS_MSA_HEADERS, timeout=12, verify=certifi.where())
+        response = requests.post(ELITEDIAS_CHECKID_URL, json=payload, headers=ELITEDIAS_HEADERS, timeout=12, verify=certifi.where())
         data = response.json()
+        
         if response.status_code == 200 and data.get("valid") == "valid":
-            username = data.get("username") or data.get("nickname") or data.get("name")
-            server_name = MSA_SERVER_ID_TO_NAME_MAP.get(str(data.get("serverid")), f"Server {data.get('serverid')}")
-            if username: return {"status": "success", "username": username.strip(), "server_name_from_api": server_name}
-            return {"status": "success", "message": "Role ID Verified.", "server_name_from_api": server_name}
-        error_message = data.get("message", "Invalid Role ID (EliteDias).")
+            username = data.get("name") or data.get("username") or data.get("nickname")
+            if username and username.lower() != 'na':
+                return {"status": "success", "username": username.strip()}
+            return {"status": "success", "message": "Role ID Verified."}
+            
+        error_message = data.get("message", f"Invalid Role ID ({game_code_for_api}).")
         return {"status": "error", "message": error_message}
-    except Exception as e: return {"status": "error", "message": "API Error (EliteDias)"}
+    except requests.RequestException as e:
+        logging.error(f"EliteDias API connection error for {game_code_for_api}: {e}")
+        return {"status": "error", "message": f"API Connection Error (EliteDias)"}
+    except Exception as e:
+        logging.error(f"Unexpected error in EliteDias check for {game_code_for_api}: {e}")
+        return {"status": "error", "message": "API Error (EliteDias)"}
 
 
 # --- Flask Routes ---
@@ -350,8 +354,11 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
         "genshin-impact": "genshin-impact", "zenless-zone-zero": "zenless-zone-zero",
         "ragnarok-origin": "ragnarok-origin", "snowbreak-containment-zone": "snowbreak"
     }
+    elitedias_games_map = {
+        "metal-slug-awakening": "metal_slug",
+        "arena-breakout": "arena_breakout"
+    }
     game_handlers = {
-        "metal-slug-awakening": lambda: check_elitedias_msa_api(uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_rox_api(uid),
         "mobile-legends-sg": lambda: check_smile_one_api("mobilelegends", uid, server_id, os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE")),
         "mobile-legends": lambda: check_smile_one_api("mobilelegends", uid, server_id, "25"),
@@ -362,6 +369,8 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
         handler = lambda: check_razer_api(razer_games_map[game_lower], uid, server_id)
     elif game_lower in smileone_games_map:
         handler = lambda: check_smile_one_api(smileone_games_map[game_lower], uid, server_id)
+    elif game_lower in elitedias_games_map:
+        handler = lambda: check_elitedias_api(elitedias_games_map[game_lower], uid)
     else:
         handler = game_handlers.get(game_lower)
 
