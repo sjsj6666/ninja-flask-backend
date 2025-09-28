@@ -65,7 +65,6 @@ NUVERSE_ROX_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
 NUVERSE_ROX_AID = "3402"
 NUVERSE_ROX_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-# THE FIX IS HERE: Added more browser-like headers
 ELITEDIAS_CHECKID_URL = "https://api.elitedias.com/checkid"
 ELITEDIAS_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
