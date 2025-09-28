@@ -64,8 +64,21 @@ RAZER_SNOWBREAK_SERVER_ID_MAP = {"sea": "215","asia": "225","americas": "235","e
 NUVERSE_ROX_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
 NUVERSE_ROX_AID = "3402"
 NUVERSE_ROX_HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+# THE FIX IS HERE: Added more browser-like headers
 ELITEDIAS_CHECKID_URL = "https://api.elitedias.com/checkid"
-ELITEDIAS_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/json; charset=utf-8", "Origin": "https://elitedias.com", "Referer": "https://elitedias.com/"}
+ELITEDIAS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Accept-Language": "en-SG,en;q=0.9",
+    "Content-Type": "application/json; charset=utf-8",
+    "Origin": "https://elitedias.com",
+    "Referer": "https://elitedias.com/",
+    "X-Requested-With": "XMLHttpRequest",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-site"
+}
 
 
 # --- Helper Functions for ID Validation ---
