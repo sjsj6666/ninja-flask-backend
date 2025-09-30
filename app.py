@@ -88,6 +88,14 @@ BIGO_NATIVE_HEADERS = {
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "cross-site"
 }
+# NEW: PUBG Mobile API constants
+PUBGM_VALIDATE_URL = "https://www.enjoygm.com/portal/supplier/api/pubg/userinfo"
+PUBGM_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+    "Accept": "*/*",
+    "Referer": "https://www.enjoygm.com/top-up/pubg-mobile",
+    "X-Requested-With": "XMLHttpRequest"
+}
 
 
 # --- Helper Functions for ID Validation ---
@@ -157,7 +165,6 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
             if game_code_for_smileone in ["honkaistarrail", "bloodstrike", "ragnarokmclassic"]: return {"status": "success", "message": "Account Verified (Username N/A from API)"}
             return {"status": "error", "message": "Username not found in API response (Code 200)"}
         
-        # THE FIX IS HERE: Translate the specific error message
         error_message = data.get("message", data.get("info", f"API error (Code: {data.get('code')})"))
         if "não existe" in error_message:
             error_message = "Invalid User ID."
@@ -285,6 +292,36 @@ def check_bigo_native_api(uid):
         logging.error(f"Unexpected error in Bigo Native check: {e}")
         return {"status": "error", "message": "API Error (Bigo)"}
 
+# NEW: PUBG Mobile API validation function
+def check_enjoygm_pubg_api(uid):
+    params = {"account": uid}
+    logging.info(f"Sending EnjoyGM PUBG API: URL='{PUBGM_VALIDATE_URL}', Params={params}")
+    try:
+        response = requests.get(PUBGM_VALIDATE_URL, params=params, headers=PUBGM_HEADERS, timeout=10, verify=certifi.where())
+        response.raise_for_status()
+        outer_data = response.json()
+
+        if outer_data.get("code") == 200 and outer_data.get("data"):
+            inner_data_str = outer_data["data"]
+            inner_data = json.loads(inner_data_str) # Parse the inner JSON string
+
+            if inner_data.get("exist") == 1 and inner_data.get("accountName"):
+                username = inner_data["accountName"]
+                return {"status": "success", "username": username.strip()}
+            else:
+                return {"status": "error", "message": "Invalid Player ID."}
+        else:
+            return {"status": "error", "message": outer_data.get("message", "Invalid Player ID.")}
+
+    except requests.RequestException as e:
+        logging.error(f"EnjoyGM PUBG API connection error: {e}")
+        return {"status": "error", "message": "API Connection Error (PUBG)"}
+    except json.JSONDecodeError as e:
+        logging.error(f"EnjoyGM PUBG API JSON decode error: {e}")
+        return {"status": "error", "message": "Invalid API response format (PUBG)."}
+    except Exception as e:
+        logging.error(f"Unexpected error in EnjoyGM PUBG check: {e}")
+        return {"status": "error", "message": "API Error (PUBG)"}
 
 # --- Flask Routes ---
 
@@ -408,6 +445,7 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
         "arena-breakout": "arena_breakout"
     }
     game_handlers = {
+        "pubg-mobile": lambda: check_enjoygm_pubg_api(uid),
         "bigo-live": lambda: check_bigo_native_api(uid),
         "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_rox_api(uid),
