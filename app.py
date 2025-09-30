@@ -64,13 +64,15 @@ ENJOYGM_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "*/*", "Referer": "https://www.enjoygm.com/", "X-Requested-With": "XMLHttpRequest"
 }
-HOK_VALIDATE_URL = "https://api.jollymax.com/jolly-gateway/topup/order/check-uid"
+# NEW: Honor of Kings API from rmtgameshop.com
+HOK_VALIDATE_URL = "https://rmtgameshop.com/game/checkid"
 HOK_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "application/json, text/plain, */*",
+    "Accept": "*/*",
     "Content-Type": "application/json",
-    "Origin": "https://www.jollymax.com",
-    "Referer": "https://www.jollymax.com/"
+    "Origin": "https://rmtgameshop.com",
+    "Referer": "https://rmtgameshop.com/",
+    "X-Auth-Token": "5a9cbf0b303b57f12e3da444f5d42c59" # Static token from log
 }
 
 
@@ -174,46 +176,22 @@ def check_enjoygm_api(game_path, uid, server_id=None):
         return {"status": "error", "message": "Invalid ID or Server."}
     except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
 
-def check_jollymax_hok_api(uid):
-    # THE FIX IS HERE: Sending the full payload structure as observed in the network log
-    payload = {
-        "token": "e27e2d7be64143ad8095758f3e5d46d3", # Static token from log
-        "jmsId": "",
-        "appId": "APPN20241210110030577000",
-        "systemFlag": "2.0",
-        "roleName": "",
-        "country": "my",
-        "language": "en",
-        "appAlias": "HonorofKings",
-        "platformName": "",
-        "serverId": "",
-        "goodsId": "GN20250704064900604000",
-        "goodsSnapshotId": "",
-        "payTypeId": "",
-        "userId": uid,
-        "activityId": "",
-        "serverName": "",
-        "domain": "www.jollymax.com",
-        "deviceId": "d3b7d3c4b1bd4f2c8701f59be040052b" # Static deviceId from log
-    }
-    logging.info(f"Sending JollyMax HOK API: URL='{HOK_VALIDATE_URL}', Payload={json.dumps(payload)}")
+def check_rmtgameshop_hok_api(uid):
+    payload = {"game": "HOK", "id": uid}
+    logging.info(f"Sending RMTGameShop HOK API: URL='{HOK_VALIDATE_URL}', Payload={json.dumps(payload)}")
     try:
         response = requests.post(HOK_VALIDATE_URL, json=payload, headers=HOK_HEADERS, timeout=10, verify=certifi.where())
         response.raise_for_status()
         data = response.json()
-        if data.get("code") == "200" and data.get("msg", "").upper() == "SUCCESS":
-            data_obj = data.get("data", {})
-            is_valid = data_obj.get("isValid")
-            nickname = data_obj.get("nickName")
-            if is_valid == 1 and nickname:
+        if not data.get("error") and data.get("code") == 200:
+            nickname = data.get("data", {}).get("nickname")
+            if nickname:
                 return {"status": "success", "username": nickname.strip()}
-            elif is_valid == 1:
-                return {"status": "success", "username": "ID Verified"}
             else:
-                return {"status": "error", "message": "Invalid Player ID."}
-        return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
+                return {"status": "error", "message": "Player found, but name is unavailable."}
+        return {"status": "error", "message": data.get("message", "Invalid Player ID.")}
     except Exception as e:
-        logging.error(f"JollyMax HOK API error: {e}")
+        logging.error(f"RMTGameShop HOK API error: {e}")
         return {"status": "error", "message": "API Error (HOK)"}
 
 
@@ -243,7 +221,7 @@ def check_game_id(game_slug, uid, server_id):
     elif game_slug == "bigo-live":
         handler = lambda: check_bigo_native_api(uid)
     elif game_slug == "honor-of-kings":
-        handler = lambda: check_jollymax_hok_api(uid)
+        handler = lambda: check_rmtgameshop_hok_api(uid)
     elif "mobile-legends" in game_slug:
         handler = lambda: perform_ml_check(uid, server_id)
         
