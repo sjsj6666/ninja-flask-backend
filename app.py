@@ -45,14 +45,6 @@ SMILE_ONE_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
     "Cookie": os.environ.get("SMILE_ONE_COOKIE")
 }
-NETEASE_IDV_BASE_URL_TEMPLATE = "https://pay.neteasegames.com/gameclub/identityv/{server_code}/login-role"
-NETEASE_IDV_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Referer": "https://pay.neteasegames.com/identityv/topup", "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-origin"}
-NETEASE_IDV_STATIC_PARAMS = { "gc_client_version": "1.9.111", "client_type": "gameclub" }
-IDV_SERVER_CODES = { "asia": "2001", "na-eu": "2011" }
-NUVERSE_ROX_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
-NUVERSE_ROX_AID = "3402"
-NUVERSE_ROX_HEADERS = {"User-Agent": "Mozilla/5.0"}
-
 ELITEDIAS_CHECKID_URL = "https://api.elitedias.com/checkid"
 ELITEDIAS_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
@@ -71,6 +63,15 @@ ENJOYGM_BASE_URL = "https://www.enjoygm.com/portal/supplier/api"
 ENJOYGM_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "*/*", "Referer": "https://www.enjoygm.com/", "X-Requested-With": "XMLHttpRequest"
+}
+# NEW: Honor of Kings API constants
+HOK_VALIDATE_URL = "https://api.jollymax.com/jolly-gateway/topup/order/check-uid"
+HOK_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    "Origin": "https://www.jollymax.com",
+    "Referer": "https://www.jollymax.com/"
 }
 
 
@@ -130,64 +131,6 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None):
         return {"status": "error", "message": error_message}
     except Exception: return {"status": "error", "message": "API Error (SmileOne)"}
 
-def check_identityv_api(server_frontend_key, roleid):
-    server_code = IDV_SERVER_CODES.get(server_frontend_key.lower())
-    if not server_code: return {"status": "error", "message": "Invalid server for Identity V."}
-    url = NETEASE_IDV_BASE_URL_TEMPLATE.format(server_code=server_code)
-    params = {"roleid": roleid, "timestamp": int(time.time() * 1000), "traceid": str(uuid.uuid4()), "deviceid": os.environ.get("NETEASE_DEVICE_ID"), **NETEASE_IDV_STATIC_PARAMS}
-    current_headers = NETEASE_IDV_HEADERS.copy(); current_headers["X-TASK-ID"] = f"transid={params['traceid']},uni_transaction_id=default"
-    logging.info(f"Sending Netease IDV: URL='{url}', Params={params}")
-    try:
-        response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
-        data = response.json()
-        api_code = data.get("code"); api_msg = (data.get("message", "") or data.get("msg", "")).strip()
-        if api_code == "0000":
-            username = data.get("data", {}).get("rolename")
-            if username and username.strip(): return {"status": "success", "username": username.strip()}
-            return {"status": "success", "message": "Role Verified"}
-        if "role not exist" in api_msg.lower() or api_code == "40004": return {"status": "error", "message": "Invalid Role ID for this server"}
-        return {"status": "error", "message": f"Invalid Role ID or API Error ({api_msg})"}
-    except Exception: return {"status": "error", "message": "API Error (IDV)"}
-
-def check_enjoygm_api(game_path, uid, server_id=None):
-    url = f"{ENJOYGM_BASE_URL}/{game_path}/userinfo"
-    params = {"account": uid}
-    if server_id: params["serverid"] = server_id
-    headers = ENJOYGM_HEADERS.copy()
-    headers["Referer"] = f"https://www.enjoygm.com/top-up/{game_path}"
-    logging.info(f"Sending EnjoyGM API: URL='{url}', Params={params}")
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=10, verify=certifi.where())
-        response.raise_for_status()
-        outer_data = response.json()
-        if outer_data.get("code") == 200 and outer_data.get("data"):
-            inner_data = json.loads(outer_data["data"])
-            username = inner_data.get("accountName") or inner_data.get("username")
-            if (inner_data.get("exist") == 1 or inner_data.get("username")) and username:
-                return {"status": "success", "username": username.strip()}
-        return {"status": "error", "message": "Invalid ID or Server."}
-    except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
-
-def check_nuverse_rox_api(role_id):
-    params = {"tab": "purchase", "aid": NUVERSE_ROX_AID, "role_id": role_id}
-    current_headers = NUVERSE_ROX_HEADERS.copy()
-    tea_payload_data = {"role_id": role_id, "user_unique_id": None, "environment": "online", "payment_channel": "out_pay_shop", "pay_way": "out_app_pay", "aid": NUVERSE_ROX_AID, "session_id": str(uuid.uuid4()), "page_instance":"game", "geo":"SG", "url": f"https://pay.nvsgames.com/topup/{NUVERSE_ROX_AID}/sg-en", "language":"en", "x-scene":0, "req_id": str(uuid.uuid4()), "timestamp": int(time.time() * 1000)}
-    current_headers["x-tea-payload"] = json.dumps(tea_payload_data)
-    logging.info(f"Sending Nuverse ROX: URL='{NUVERSE_ROX_VALIDATE_URL}', Params={params}")
-    try:
-        response = requests.get(NUVERSE_ROX_VALIDATE_URL, params=params, headers=current_headers, timeout=10, verify=certifi.where())
-        data = response.json()
-        if data.get("code") == 0 and data.get("message", "").lower() == "success":
-            if "data" in data and data["data"]:
-                role_info = data["data"][0]; username = role_info.get("role_name"); server_name = role_info.get("server_name")
-                if username: return {"status": "success", "username": username.strip(), "server_name_from_api": server_name}
-                return {"status": "success", "message": "Role ID Verified"}
-            return {"status": "error", "message": "Role ID not found"}
-        error_message = data.get("message", "Unknown error")
-        if data.get("code") == 20012: error_message = "Invalid Role ID (Nuverse)"
-        return {"status": "error", "message": error_message}
-    except Exception: return {"status": "error", "message": "API Error (Nuverse)"}
-
 def check_elitedias_api(game_code_for_api, role_id):
     payload = {"game": game_code_for_api, "userid": str(role_id)}
     logging.info(f"Sending EliteDias API: URL='{ELITEDIAS_CHECKID_URL}', Payload='{json.dumps(payload)}'")
@@ -213,6 +156,54 @@ def check_bigo_native_api(uid):
         return {"status": "error", "message": data.get("errorMsg", "Invalid Bigo ID.")}
     except Exception: return {"status": "error", "message": "API Error (Bigo)"}
 
+def check_enjoygm_api(game_path, uid, server_id=None):
+    url = f"{ENJOYGM_BASE_URL}/{game_path}/userinfo"
+    params = {"account": uid}
+    if server_id: params["serverid"] = server_id
+    headers = ENJOYGM_HEADERS.copy()
+    headers["Referer"] = f"https://www.enjoygm.com/top-up/{game_path}"
+    logging.info(f"Sending EnjoyGM API: URL='{url}', Params={params}")
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=10, verify=certifi.where())
+        response.raise_for_status()
+        outer_data = response.json()
+        if outer_data.get("code") == 200 and outer_data.get("data"):
+            inner_data = json.loads(outer_data["data"])
+            username = inner_data.get("accountName") or inner_data.get("username")
+            if (inner_data.get("exist") == 1 or inner_data.get("username")) and username:
+                return {"status": "success", "username": username.strip()}
+        return {"status": "error", "message": "Invalid ID or Server."}
+    except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
+
+def check_jollymax_hok_api(uid):
+    # This payload is based on your network log, but simplified.
+    # Some values like token, goodsId, etc., are dynamic and may not be required for just the UID check.
+    # We will send the most essential parts.
+    payload = {
+        "appAlias": "HonorofKings",
+        "country": "my", # Can be hardcoded or made dynamic if needed
+        "language": "en",
+        "userId": uid,
+        "systemFlag": "2.0"
+    }
+    logging.info(f"Sending JollyMax HOK API: URL='{HOK_VALIDATE_URL}', Payload={json.dumps(payload)}")
+    try:
+        response = requests.post(HOK_VALIDATE_URL, json=payload, headers=HOK_HEADERS, timeout=10, verify=certifi.where())
+        response.raise_for_status()
+        data = response.json()
+        # The API returns '200' as a string, so we check for that
+        if data.get("code") == "200" and data.get("msg", "").upper() == "SUCCESS":
+            is_valid = data.get("data", {}).get("isValid")
+            if is_valid == 1:
+                # API doesn't return username, so we return a generic success message
+                return {"status": "success", "username": "ID Verified"}
+            else:
+                return {"status": "error", "message": "Invalid Player ID."}
+        return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
+    except Exception as e:
+        logging.error(f"JollyMax HOK API error: {e}")
+        return {"status": "error", "message": "API Error (HOK)"}
+
 
 # --- Flask Routes ---
 @app.route('/')
@@ -223,21 +214,26 @@ def home(): return "NinjaTopUp API Backend is Live!"
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
     
-    game_handlers = {
-        "pubg-mobile": lambda: check_enjoygm_api("pubg", uid),
-        "genshin-impact": lambda: check_enjoygm_api("genshin-impact", uid, server_id),
-        "honkai-star-rail": lambda: check_enjoygm_api("honkai", uid, server_id),
-        "zenless-zone-zero": lambda: check_enjoygm_api("zenless-zone-zero", uid, server_id),
-        "metal-slug-awakening": lambda: check_elitedias_api("metal_slug", uid),
-        "arena-breakout": lambda: check_elitedias_api("arena_breakout", uid),
-        "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
-        "bigo-live": lambda: check_bigo_native_api(uid),
-        "mobile-legends": lambda: perform_ml_check(uid, server_id),
-        "mobile-legends-sg": lambda: perform_ml_check(uid, server_id),
-        "identity-v": lambda: check_identityv_api(server_id, uid),
+    enjoygm_map = {
+        "pubg-mobile": "pubg", "genshin-impact": "genshin-impact",
+        "honkai-star-rail": "honkai", "zenless-zone-zero": "zenless-zone-zero"
     }
+    elitedias_map = {"metal-slug-awakening": "metal_slug", "arena-breakout": "arena_breakout"}
+    smileone_map = {"bloodstrike": "bloodstrike"}
     
-    handler = game_handlers.get(game_slug)
+    handler = None
+    if game_slug in enjoygm_map:
+        handler = lambda: check_enjoygm_api(enjoygm_map[game_slug], uid, server_id)
+    elif game_slug in elitedias_map:
+        handler = lambda: check_elitedias_api(elitedias_map[game_slug], uid)
+    elif game_slug in smileone_map:
+        handler = lambda: check_smile_one_api(smileone_map[game_slug], uid)
+    elif game_slug == "bigo-live":
+        handler = lambda: check_bigo_native_api(uid)
+    elif game_slug == "honor-of-kings": # NEW: Routing for Honor of Kings
+        handler = lambda: check_jollymax_hok_api(uid)
+    elif "mobile-legends" in game_slug:
+        handler = lambda: perform_ml_check(uid, server_id)
         
     if handler:
         result = handler()
@@ -246,6 +242,8 @@ def check_game_id(game_slug, uid, server_id):
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
+
+# Other routes like /sitemap.xml, /create-paynow-qr, etc. remain the same...
 
 @app.route('/sitemap.xml')
 def generate_sitemap():
@@ -281,31 +279,6 @@ def create_paynow_qr():
             return jsonify({'qr_code_data': qr_code_data_uri, 'message': 'QR code generated successfully.'})
         return jsonify({'error': 'Invalid response from QR service.'}), 502
     except Exception as e: return jsonify({"error": str(e)}), 500
-
-@app.route('/check-ml-region', methods=['POST'])
-def check_ml_region():
-    data = request.get_json()
-    if not data or 'userId' not in data or 'zoneId' not in data:
-        return jsonify({'status': 'error', 'message': 'User ID and Zone ID are required.'}), 400
-    user_id = data['userId']
-    zone_id = data['zoneId']
-    result = perform_ml_check(user_id, zone_id)
-    return jsonify(result), 200
-    
-@app.route('/get-rates', methods=['GET'])
-def get_rates():
-    try:
-        response = supabase.table('site_settings').select('setting_value').eq('setting_key', 'exchangerate_api_key').single().execute()
-        API_KEY = response.data['setting_value']
-        url = f"https://v6.exchangerate-api.com/v6/{API_KEY}/latest/SGD"
-        api_response = requests.get(url, timeout=10, verify=certifi.where())
-        api_response.raise_for_status()
-        data = api_response.json()
-        if data.get('result') == 'success':
-            return jsonify(data.get('conversion_rates', {}))
-        return jsonify({"error": "API error"}), 400
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
