@@ -118,7 +118,7 @@ def perform_ml_check(user_id, zone_id):
     logging.info(f"Attempting fallback ML API (Smile.One) for user: {user_id}")
     fallback_result = check_smile_one_api("mobilelegends", user_id, zone_id)
     if fallback_result.get("status") == "success":
-        fallback_result['region'] = 'N/A' # Fallback does not provide region
+        fallback_result['region'] = 'N/A'
     return fallback_result
 
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
@@ -131,12 +131,20 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
     pid_to_use = specific_smileone_pid
     if not pid_to_use:
         love_deepspace_pids_map = { "81": "19226", "82": "19227", "83": "19227" }
-        default_pids_map = {"mobilelegends": os.environ.get("SMILE_ONE_PID_MLBB_DEFAULT", "25"), "honkaistarrail": os.environ.get("SMILE_ONE_PID_HSR_DEFAULT", "18356"), "bloodstrike": os.environ.get("SMILE_ONE_PID_BLOODSTRIKE", "20294"), "ragnarokmclassic": os.environ.get("SMILE_ONE_PID_ROM_DEFAULT", "23026")}
+        # THE FIX IS HERE: Corrected the PID for Bloodstrike
+        default_pids_map = {"mobilelegends": os.environ.get("SMILE_ONE_PID_MLBB_DEFAULT", "25"), "honkaistarrail": os.environ.get("SMILE_ONE_PID_HSR_DEFAULT", "18356"), "bloodstrike": "20295", "ragnarokmclassic": os.environ.get("SMILE_ONE_PID_ROM_DEFAULT", "23026")}
         pid_to_use = love_deepspace_pids_map.get(str(server_id)) if game_code_for_smileone == "loveanddeepspace" else default_pids_map.get(game_code_for_smileone)
     if pid_to_use is None: return {"status": "error", "message": f"Product ID (PID) could not be resolved for '{game_code_for_smileone}'."}
     params = {"pid": pid_to_use, "checkrole": "1"}
-    if game_code_for_smileone == "mobilelegends": params.update({"user_id": uid, "zone_id": server_id})
-    else: params.update({"uid": uid, "sid": server_id})
+    
+    # THE FIX IS HERE: Specific handling for Bloodstrike's serverless check
+    if game_code_for_smileone == "mobilelegends":
+        params.update({"user_id": uid, "zone_id": server_id})
+    elif game_code_for_smileone == "bloodstrike":
+        params.update({"uid": uid, "sid": "-1"}) # Always use -1 for sid
+    elif game_code_for_smileone in ["honkaistarrail", "ragnarokmclassic", "loveanddeepspace"]:
+        params.update({"uid": uid, "sid": server_id})
+
     logging.info(f"Sending SmileOne: Game='{game_code_for_smileone}', URL='{url}', PID='{pid_to_use}', Params={params}")
     raw_text = ""
     try:
@@ -351,7 +359,6 @@ def create_paynow_qr():
         logging.error(f"QR proxy error: {e}")
         return jsonify({"error": str(e)}), 500
 
-# This endpoint is now only used by ml-checker.html
 @app.route('/check-ml-region', methods=['POST'])
 def check_ml_region():
     data = request.get_json()
@@ -385,7 +392,7 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
         return jsonify({"status": "error", "message": "User ID/Role ID is required."}), 400
 
     smileone_games_map = {
-        "honkai-star-rail": "honkaistarrail", "bloodstrike": "bloodstrike",
+        "honkai-star-rail": "honkaistarrail",
         "ragnarok-m-classic": "ragnarokmclassic", "love-and-deepspace": "loveanddeepspace"
     }
     razer_games_map = {
@@ -398,6 +405,7 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     }
     game_handlers = {
         "bigo-live": lambda: check_bigo_native_api(uid),
+        "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid), # No server_id passed
         "ragnarok-x-next-generation": lambda: check_nuverse_rox_api(uid),
         "mobile-legends-sg": lambda: perform_ml_check(uid, server_id),
         "mobile-legends": lambda: perform_ml_check(uid, server_id),
