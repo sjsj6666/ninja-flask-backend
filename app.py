@@ -175,7 +175,6 @@ def check_enjoygm_api(game_path, uid, server_id=None):
     except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
 
 def check_jollymax_hok_api(uid):
-    # THE FIX IS HERE: Added the mandatory appId and a default goodsId
     payload = {
         "appId": "APPN20241210110030577000",
         "goodsId": "GN20250704064900604000",
@@ -191,12 +190,16 @@ def check_jollymax_hok_api(uid):
         response.raise_for_status()
         data = response.json()
         if data.get("code") == "200" and data.get("msg", "").upper() == "SUCCESS":
-            is_valid = data.get("data", {}).get("isValid")
-            if is_valid == 1:
+            # THE FIX IS HERE: Extract the nickName from the new response structure
+            data_obj = data.get("data", {})
+            is_valid = data_obj.get("isValid")
+            nickname = data_obj.get("nickName")
+            if is_valid == 1 and nickname:
+                return {"status": "success", "username": nickname.strip()}
+            elif is_valid == 1:
                 return {"status": "success", "username": "ID Verified"}
             else:
                 return {"status": "error", "message": "Invalid Player ID."}
-        # The API returns the error message directly
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception as e:
         logging.error(f"JollyMax HOK API error: {e}")
@@ -216,7 +219,7 @@ def check_game_id(game_slug, uid, server_id):
         "pubg-mobile": "pubg", "genshin-impact": "genshin-impact",
         "honkai-star-rail": "honkai", "zenless-zone-zero": "zenless-zone-zero"
     }
-    elitedias_map = {"metal-slug-awakening": "metal_slug", "arena-breakout": "arena-breakout"}
+    elitedias_map = {"metal-slug-awakening": "metal_slug", "arena-breakout": "arena_breakout"}
     smileone_map = {"bloodstrike": "bloodstrike"}
     
     handler = None
