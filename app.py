@@ -78,8 +78,6 @@ ELITEDIAS_HEADERS = {
     "Sec-Fetch-Mode": "cors",
     "Sec-Fetch-Site": "same-site"
 }
-
-# NEW: Bigo Live Native API constants
 BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
 BIGO_NATIVE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
@@ -94,8 +92,36 @@ BIGO_NATIVE_HEADERS = {
 
 # --- Helper Functions for ID Validation ---
 
+def perform_ml_check(user_id, zone_id):
+    try:
+        logging.info(f"Attempting primary ML API (caliph.dev) for user: {user_id}")
+        api_url = "https://cekidml.caliph.dev/api/validasi"
+        params = {'id': user_id, 'serverid': zone_id}
+        response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7)
+        if response.status_code == 200:
+            response_data = response.json()
+            if response_data.get("status") == "success" and response_data.get("result", {}).get("nickname"):
+                nickname = response_data["result"]["nickname"]
+                country_name = response_data["result"].get("country")
+                country_code = "N/A"
+                if country_name:
+                    try:
+                        country = pycountry.countries.get(name=country_name)
+                        if country: country_code = country.alpha_2
+                    except Exception: pass
+                logging.info(f"Primary ML API Success! Nickname: {nickname}, Region: {country_code}")
+                return {'status': 'success', 'username': nickname, 'region': country_code}
+        logging.warning("Primary ML API failed. Proceeding to fallback.")
+    except Exception as e:
+        logging.error(f"Primary ML API exception: {e}. Proceeding to fallback.")
+
+    logging.info(f"Attempting fallback ML API (Smile.One) for user: {user_id}")
+    fallback_result = check_smile_one_api("mobilelegends", user_id, zone_id)
+    if fallback_result.get("status") == "success":
+        fallback_result['region'] = 'N/A' # Fallback does not provide region
+    return fallback_result
+
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
-    # This function remains unchanged, but Bigo Live is no longer calling it
     endpoints = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "honkaistarrail": "https://www.smile.one/br/merchant/honkai/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"}
     if game_code_for_smileone not in endpoints: return {"status": "error", "message": f"Game '{game_code_for_smileone}' not configured for SmileOne."}
     url = endpoints[game_code_for_smileone]
@@ -227,7 +253,6 @@ def check_elitedias_api(game_code_for_api, role_id):
         logging.error(f"Unexpected error in EliteDias check for {game_code_for_api}: {e}")
         return {"status": "error", "message": "API Error (EliteDias)"}
 
-# NEW: Bigo Live Native API validation function
 def check_bigo_native_api(uid):
     params = {"isFromApp": "0", "bigoId": uid}
     logging.info(f"Sending Bigo Native API: URL='{BIGO_NATIVE_VALIDATE_URL}', Params={params}")
@@ -326,6 +351,7 @@ def create_paynow_qr():
         logging.error(f"QR proxy error: {e}")
         return jsonify({"error": str(e)}), 500
 
+# This endpoint is now only used by ml-checker.html
 @app.route('/check-ml-region', methods=['POST'])
 def check_ml_region():
     data = request.get_json()
@@ -333,35 +359,8 @@ def check_ml_region():
         return jsonify({'status': 'error', 'message': 'User ID and Zone ID are required.'}), 400
     user_id = data['userId']
     zone_id = data['zoneId']
-    
-    try:
-        logging.info(f"Attempting primary API (caliph.dev) for user: {user_id}")
-        api_url = "https://cekidml.caliph.dev/api/validasi"
-        params = {'id': user_id, 'serverid': zone_id}
-        response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7)
-        if response.status_code == 200:
-            response_data = response.json()
-            if response_data.get("status") == "success" and response_data.get("result", {}).get("nickname"):
-                nickname = response_data["result"]["nickname"]
-                country_name = response_data["result"].get("country")
-                country_code = "N/A"
-                if country_name:
-                    try:
-                        country = pycountry.countries.get(name=country_name)
-                        if country: country_code = country.alpha_2
-                    except Exception: pass
-                logging.info(f"Primary API Success! Nickname: {nickname}, Region: {country_code}")
-                return jsonify({'status': 'success', 'username': nickname, 'region': country_code}), 200
-        logging.warning("Primary API failed. Proceeding to fallback.")
-    except Exception as e:
-        logging.error(f"Primary API exception: {e}. Proceeding to fallback.")
-
-    logging.info(f"Attempting fallback API (Smile.One) for user: {user_id}")
-    fallback_result = check_smile_one_api("mobilelegends", user_id, zone_id)
-    if fallback_result.get("status") == "success":
-        fallback_result['region'] = 'N/A'
-    
-    return jsonify(fallback_result), 200
+    result = perform_ml_check(user_id, zone_id)
+    return jsonify(result), 200
 
 @app.route('/get-rates', methods=['GET'])
 def get_rates():
@@ -385,7 +384,6 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     if not uid:
         return jsonify({"status": "error", "message": "User ID/Role ID is required."}), 400
 
-    # UPDATED ROUTING: Bigo Live is now handled separately
     smileone_games_map = {
         "honkai-star-rail": "honkaistarrail", "bloodstrike": "bloodstrike",
         "ragnarok-m-classic": "ragnarokmclassic", "love-and-deepspace": "loveanddeepspace"
@@ -399,10 +397,10 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
         "arena-breakout": "arena_breakout"
     }
     game_handlers = {
-        "bigo-live": lambda: check_bigo_native_api(uid), # Using the new function
+        "bigo-live": lambda: check_bigo_native_api(uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_rox_api(uid),
-        "mobile-legends-sg": lambda: check_smile_one_api("mobilelegends", uid, server_id, os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE")),
-        "mobile-legends": lambda: check_smile_one_api("mobilelegends", uid, server_id, "25"),
+        "mobile-legends-sg": lambda: perform_ml_check(uid, server_id),
+        "mobile-legends": lambda: perform_ml_check(uid, server_id),
         "identity-v": lambda: check_identityv_api(server_id, uid),
     }
 
