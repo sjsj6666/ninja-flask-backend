@@ -175,14 +175,26 @@ def check_enjoygm_api(game_path, uid, server_id=None):
     except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
 
 def check_jollymax_hok_api(uid):
+    # THE FIX IS HERE: Sending the full payload structure as observed in the network log
     payload = {
+        "token": "e27e2d7be64143ad8095758f3e5d46d3", # Static token from log
+        "jmsId": "",
         "appId": "APPN20241210110030577000",
-        "goodsId": "GN20250704064900604000",
-        "appAlias": "HonorofKings",
+        "systemFlag": "2.0",
+        "roleName": "",
         "country": "my",
         "language": "en",
+        "appAlias": "HonorofKings",
+        "platformName": "",
+        "serverId": "",
+        "goodsId": "GN20250704064900604000",
+        "goodsSnapshotId": "",
+        "payTypeId": "",
         "userId": uid,
-        "systemFlag": "2.0"
+        "activityId": "",
+        "serverName": "",
+        "domain": "www.jollymax.com",
+        "deviceId": "d3b7d3c4b1bd4f2c8701f59be040052b" # Static deviceId from log
     }
     logging.info(f"Sending JollyMax HOK API: URL='{HOK_VALIDATE_URL}', Payload={json.dumps(payload)}")
     try:
