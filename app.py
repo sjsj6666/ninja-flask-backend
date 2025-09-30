@@ -79,26 +79,38 @@ ELITEDIAS_HEADERS = {
     "Sec-Fetch-Site": "same-site"
 }
 
+# NEW: Bigo Live Native API constants
+BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
+BIGO_NATIVE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+    "Accept": "*/*",
+    "Origin": "https://www.gamebar.gg",
+    "Referer": "https://www.gamebar.gg/",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "cross-site"
+}
+
 
 # --- Helper Functions for ID Validation ---
 
 def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_smileone_pid=None):
-    endpoints = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "honkaistarrail": "https://www.smile.one/br/merchant/honkai/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/", "bigolive": "https://www.smile.one/sg/merchant/bigo/checkrole"}
+    # This function remains unchanged, but Bigo Live is no longer calling it
+    endpoints = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "honkaistarrail": "https://www.smile.one/br/merchant/honkai/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"}
     if game_code_for_smileone not in endpoints: return {"status": "error", "message": f"Game '{game_code_for_smileone}' not configured for SmileOne."}
     url = endpoints[game_code_for_smileone]
     current_headers = SMILE_ONE_HEADERS.copy()
-    referer_map = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends", "honkaistarrail": "https://www.smile.one/br/merchant/honkai", "bloodstrike": "https://www.smile.one/br/merchant/game/bloodstrike", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace", "bigolive": "https://www.smile.one/sg/merchant/bigo"}
+    referer_map = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends", "honkaistarrail": "https://www.smile.one/br/merchant/honkai", "bloodstrike": "https://www.smile.one/br/merchant/game/bloodstrike", "ragnarokmclassic": "https://www.smile.one/sg/merchant/ragnarokmclassic", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace"}
     current_headers["Referer"] = referer_map.get(game_code_for_smileone, f"https://www.smile.one/merchant/{game_code_for_smileone}")
     pid_to_use = specific_smileone_pid
     if not pid_to_use:
         love_deepspace_pids_map = { "81": "19226", "82": "19227", "83": "19227" }
-        default_pids_map = {"mobilelegends": os.environ.get("SMILE_ONE_PID_MLBB_DEFAULT", "25"), "honkaistarrail": os.environ.get("SMILE_ONE_PID_HSR_DEFAULT", "18356"), "bloodstrike": os.environ.get("SMILE_ONE_PID_BLOODSTRIKE", "20294"), "ragnarokmclassic": os.environ.get("SMILE_ONE_PID_ROM_DEFAULT", "23026"), "bigolive": os.environ.get("SMILE_ONE_PID_BIGO", "20580")}
+        default_pids_map = {"mobilelegends": os.environ.get("SMILE_ONE_PID_MLBB_DEFAULT", "25"), "honkaistarrail": os.environ.get("SMILE_ONE_PID_HSR_DEFAULT", "18356"), "bloodstrike": os.environ.get("SMILE_ONE_PID_BLOODSTRIKE", "20294"), "ragnarokmclassic": os.environ.get("SMILE_ONE_PID_ROM_DEFAULT", "23026")}
         pid_to_use = love_deepspace_pids_map.get(str(server_id)) if game_code_for_smileone == "loveanddeepspace" else default_pids_map.get(game_code_for_smileone)
     if pid_to_use is None: return {"status": "error", "message": f"Product ID (PID) could not be resolved for '{game_code_for_smileone}'."}
     params = {"pid": pid_to_use, "checkrole": "1"}
     if game_code_for_smileone == "mobilelegends": params.update({"user_id": uid, "zone_id": server_id})
-    elif game_code_for_smileone in ["honkaistarrail", "ragnarokmclassic", "loveanddeepspace", "bloodstrike"]: params.update({"uid": uid, "sid": server_id})
-    elif game_code_for_smileone == "bigolive": params.update({"uid": uid, "product": "bigosg"})
+    else: params.update({"uid": uid, "sid": server_id})
     logging.info(f"Sending SmileOne: Game='{game_code_for_smileone}', URL='{url}', PID='{pid_to_use}', Params={params}")
     raw_text = ""
     try:
@@ -107,14 +119,9 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
         response.raise_for_status(); raw_text = response.text
         data = response.json()
         if data.get("code") == 200:
-            name_key = "username" if game_code_for_smileone == "mobilelegends" else "message" if game_code_for_smileone == "bigolive" else "nickname"
+            name_key = "username" if game_code_for_smileone == "mobilelegends" else "nickname"
             username = data.get(name_key)
-            if not username or not isinstance(username, str) or not username.strip():
-                for alt_key in ["username", "nickname", "role_name", "name", "char_name", "message"]:
-                    if alt_key == name_key: continue
-                    username = data.get(alt_key)
-                    if username and isinstance(username, str) and username.strip(): break
-            if username and username.strip(): return {"status": "success", "username": username.strip()}
+            if username and isinstance(username, str) and username.strip(): return {"status": "success", "username": username.strip()}
             if game_code_for_smileone in ["honkaistarrail", "bloodstrike", "ragnarokmclassic"]: return {"status": "success", "message": "Account Verified (Username N/A from API)"}
             return {"status": "error", "message": "Username not found in API response (Code 200)"}
         return {"status": "error", "message": data.get("message", data.get("info", f"API error (Code: {data.get('code')})"))}
@@ -219,6 +226,27 @@ def check_elitedias_api(game_code_for_api, role_id):
     except Exception as e:
         logging.error(f"Unexpected error in EliteDias check for {game_code_for_api}: {e}")
         return {"status": "error", "message": "API Error (EliteDias)"}
+
+# NEW: Bigo Live Native API validation function
+def check_bigo_native_api(uid):
+    params = {"isFromApp": "0", "bigoId": uid}
+    logging.info(f"Sending Bigo Native API: URL='{BIGO_NATIVE_VALIDATE_URL}', Params={params}")
+    try:
+        response = requests.get(BIGO_NATIVE_VALIDATE_URL, params=params, headers=BIGO_NATIVE_HEADERS, timeout=10, verify=certifi.where())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("result") == 0 and "data" in data and data["data"].get("nick_name"):
+            username = data["data"]["nick_name"]
+            return {"status": "success", "username": username.strip()}
+        else:
+            error_message = data.get("errorMsg", "Invalid Bigo ID or API error.")
+            return {"status": "error", "message": error_message}
+    except requests.RequestException as e:
+        logging.error(f"Bigo Native API connection error: {e}")
+        return {"status": "error", "message": "API Connection Error (Bigo)"}
+    except Exception as e:
+        logging.error(f"Unexpected error in Bigo Native check: {e}")
+        return {"status": "error", "message": "API Error (Bigo)"}
 
 
 # --- Flask Routes ---
@@ -357,10 +385,10 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     if not uid:
         return jsonify({"status": "error", "message": "User ID/Role ID is required."}), 400
 
+    # UPDATED ROUTING: Bigo Live is now handled separately
     smileone_games_map = {
         "honkai-star-rail": "honkaistarrail", "bloodstrike": "bloodstrike",
-        "ragnarok-m-classic": "ragnarokmclassic", "love-and-deepspace": "loveanddeepspace",
-        "bigo-live": "bigolive"
+        "ragnarok-m-classic": "ragnarokmclassic", "love-and-deepspace": "loveanddeepspace"
     }
     razer_games_map = {
         "genshin-impact": "genshin-impact", "zenless-zone-zero": "zenless-zone-zero",
@@ -371,6 +399,7 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
         "arena-breakout": "arena_breakout"
     }
     game_handlers = {
+        "bigo-live": lambda: check_bigo_native_api(uid), # Using the new function
         "ragnarok-x-next-generation": lambda: check_nuverse_rox_api(uid),
         "mobile-legends-sg": lambda: check_smile_one_api("mobilelegends", uid, server_id, os.environ.get("SMILE_ONE_PID_MLBB_SG_CHECKROLE")),
         "mobile-legends": lambda: check_smile_one_api("mobilelegends", uid, server_id, "25"),
