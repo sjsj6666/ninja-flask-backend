@@ -64,7 +64,6 @@ ENJOYGM_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "*/*", "Referer": "https://www.enjoygm.com/", "X-Requested-With": "XMLHttpRequest"
 }
-# NEW: Honor of Kings API constants
 HOK_VALIDATE_URL = "https://api.jollymax.com/jolly-gateway/topup/order/check-uid"
 HOK_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
@@ -176,12 +175,12 @@ def check_enjoygm_api(game_path, uid, server_id=None):
     except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
 
 def check_jollymax_hok_api(uid):
-    # This payload is based on your network log, but simplified.
-    # Some values like token, goodsId, etc., are dynamic and may not be required for just the UID check.
-    # We will send the most essential parts.
+    # THE FIX IS HERE: Added the mandatory appId and a default goodsId
     payload = {
+        "appId": "APPN20241210110030577000",
+        "goodsId": "GN20250704064900604000",
         "appAlias": "HonorofKings",
-        "country": "my", # Can be hardcoded or made dynamic if needed
+        "country": "my",
         "language": "en",
         "userId": uid,
         "systemFlag": "2.0"
@@ -191,14 +190,13 @@ def check_jollymax_hok_api(uid):
         response = requests.post(HOK_VALIDATE_URL, json=payload, headers=HOK_HEADERS, timeout=10, verify=certifi.where())
         response.raise_for_status()
         data = response.json()
-        # The API returns '200' as a string, so we check for that
         if data.get("code") == "200" and data.get("msg", "").upper() == "SUCCESS":
             is_valid = data.get("data", {}).get("isValid")
             if is_valid == 1:
-                # API doesn't return username, so we return a generic success message
                 return {"status": "success", "username": "ID Verified"}
             else:
                 return {"status": "error", "message": "Invalid Player ID."}
+        # The API returns the error message directly
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception as e:
         logging.error(f"JollyMax HOK API error: {e}")
@@ -218,7 +216,7 @@ def check_game_id(game_slug, uid, server_id):
         "pubg-mobile": "pubg", "genshin-impact": "genshin-impact",
         "honkai-star-rail": "honkai", "zenless-zone-zero": "zenless-zone-zero"
     }
-    elitedias_map = {"metal-slug-awakening": "metal_slug", "arena-breakout": "arena_breakout"}
+    elitedias_map = {"metal-slug-awakening": "metal_slug", "arena-breakout": "arena-breakout"}
     smileone_map = {"bloodstrike": "bloodstrike"}
     
     handler = None
@@ -230,7 +228,7 @@ def check_game_id(game_slug, uid, server_id):
         handler = lambda: check_smile_one_api(smileone_map[game_slug], uid)
     elif game_slug == "bigo-live":
         handler = lambda: check_bigo_native_api(uid)
-    elif game_slug == "honor-of-kings": # NEW: Routing for Honor of Kings
+    elif game_slug == "honor-of-kings":
         handler = lambda: check_jollymax_hok_api(uid)
     elif "mobile-legends" in game_slug:
         handler = lambda: perform_ml_check(uid, server_id)
@@ -242,8 +240,6 @@ def check_game_id(game_slug, uid, server_id):
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
-
-# Other routes like /sitemap.xml, /create-paynow-qr, etc. remain the same...
 
 @app.route('/sitemap.xml')
 def generate_sitemap():
