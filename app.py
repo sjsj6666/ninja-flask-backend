@@ -190,7 +190,6 @@ def check_jollymax_hok_api(uid):
         response.raise_for_status()
         data = response.json()
         if data.get("code") == "200" and data.get("msg", "").upper() == "SUCCESS":
-            # THE FIX IS HERE: Extract the nickName from the new response structure
             data_obj = data.get("data", {})
             is_valid = data_obj.get("isValid")
             nickname = data_obj.get("nickName")
