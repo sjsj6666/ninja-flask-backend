@@ -131,17 +131,15 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
     pid_to_use = specific_smileone_pid
     if not pid_to_use:
         love_deepspace_pids_map = { "81": "19226", "82": "19227", "83": "19227" }
-        # THE FIX IS HERE: Corrected the PID for Bloodstrike
         default_pids_map = {"mobilelegends": os.environ.get("SMILE_ONE_PID_MLBB_DEFAULT", "25"), "honkaistarrail": os.environ.get("SMILE_ONE_PID_HSR_DEFAULT", "18356"), "bloodstrike": "20295", "ragnarokmclassic": os.environ.get("SMILE_ONE_PID_ROM_DEFAULT", "23026")}
         pid_to_use = love_deepspace_pids_map.get(str(server_id)) if game_code_for_smileone == "loveanddeepspace" else default_pids_map.get(game_code_for_smileone)
     if pid_to_use is None: return {"status": "error", "message": f"Product ID (PID) could not be resolved for '{game_code_for_smileone}'."}
     params = {"pid": pid_to_use, "checkrole": "1"}
     
-    # THE FIX IS HERE: Specific handling for Bloodstrike's serverless check
     if game_code_for_smileone == "mobilelegends":
         params.update({"user_id": uid, "zone_id": server_id})
     elif game_code_for_smileone == "bloodstrike":
-        params.update({"uid": uid, "sid": "-1"}) # Always use -1 for sid
+        params.update({"uid": uid, "sid": "-1"})
     elif game_code_for_smileone in ["honkaistarrail", "ragnarokmclassic", "loveanddeepspace"]:
         params.update({"uid": uid, "sid": server_id})
 
@@ -158,7 +156,13 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None, specific_sm
             if username and isinstance(username, str) and username.strip(): return {"status": "success", "username": username.strip()}
             if game_code_for_smileone in ["honkaistarrail", "bloodstrike", "ragnarokmclassic"]: return {"status": "success", "message": "Account Verified (Username N/A from API)"}
             return {"status": "error", "message": "Username not found in API response (Code 200)"}
-        return {"status": "error", "message": data.get("message", data.get("info", f"API error (Code: {data.get('code')})"))}
+        
+        # THE FIX IS HERE: Translate the specific error message
+        error_message = data.get("message", data.get("info", f"API error (Code: {data.get('code')})"))
+        if "não existe" in error_message:
+            error_message = "Invalid User ID."
+        return {"status": "error", "message": error_message}
+
     except ValueError:
         if game_code_for_smileone == "loveanddeepspace" and "<span class=\"name\">" in raw_text and "uid_error_tips" not in raw_text:
             try:
@@ -405,7 +409,7 @@ def check_game_id(game_slug_from_frontend, uid, server_id):
     }
     game_handlers = {
         "bigo-live": lambda: check_bigo_native_api(uid),
-        "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid), # No server_id passed
+        "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_rox_api(uid),
         "mobile-legends-sg": lambda: perform_ml_check(uid, server_id),
         "mobile-legends": lambda: perform_ml_check(uid, server_id),
