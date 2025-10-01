@@ -86,13 +86,18 @@ def perform_ml_check(user_id, zone_id):
     return fallback_result
 
 def check_smile_one_api(game_code, uid, server_id=None):
-    endpoints = { "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"}
+    endpoints = {
+        "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", 
+        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
+        "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"
+    }
     pids = {"mobilelegends": "25", "bloodstrike": "20295"}
     if game_code not in endpoints: return {"status": "error", "message": f"Game not configured: {game_code}"}
     
     pid_to_use = pids.get(game_code)
     if game_code == "loveanddeepspace":
-        pid_to_use = {"81": "18760", "82": "18762", "83": "18762"}.get(str(server_id))
+        server_pid_map = {"Asia": "18762", "America": "18760", "Europe": "18762"}
+        pid_to_use = server_pid_map.get(str(server_id))
     if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
         
     params = {"pid": pid_to_use, "checkrole": "1"}
@@ -104,9 +109,11 @@ def check_smile_one_api(game_code, uid, server_id=None):
     try:
         response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
         if "nickname" in response.text and "text/html" in response.headers.get('content-type', ''):
-            start_idx = response.text.find('{"nickname":"') + len('{"nickname":"')
-            end_idx = response.text.find('"', start_idx)
-            return {"status": "success", "username": response.text[start_idx:end_idx]}
+            try:
+                start_idx = response.text.find('{"nickname":"') + len('{"nickname":"')
+                end_idx = response.text.find('"', start_idx)
+                return {"status": "success", "username": response.text[start_idx:end_idx]}
+            except Exception: pass
         data = response.json()
         if data.get("code") == 200:
             username = data.get("username") or data.get("nickname")
@@ -167,10 +174,12 @@ def check_spacegaming_api(game_id, uid):
     except Exception: return {"status": "error", "message": f"API Error ({game_id})"}
 
 def check_netease_api(game_path, server_id, role_id):
-    params = {"roleid": role_id, "timestamp": int(time.time() * 1000)}
+    params = { "deviceid": "156032181698579111", "traceid": str(uuid.uuid4()), "timestamp": int(time.time() * 1000), "gc_client_version": "1.11.4", "roleid": role_id, "client_type": "gameclub" }
+    current_headers = NETEASE_HEADERS.copy()
+    current_headers['X-TASK-ID'] = f"transid={params['traceid']},uni_transaction_id=default"
     logging.info(f"Sending Netease API: Game='{game_path}', Params={params}")
     try:
-        response = requests.get(f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role", params=params, headers=NETEASE_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.get(f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role", params=params, headers=current_headers, timeout=10, verify=certifi.where())
         data = response.json()
         if data.get("code") == "0000":
             username = data.get("data", {}).get("rolename")
