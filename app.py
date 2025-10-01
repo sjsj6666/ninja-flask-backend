@@ -8,7 +8,7 @@ import requests
 import certifi
 import pycountry
 from flask import Flask, jsonify, request, Response
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 from supabase import create_client, Client
 from datetime import datetime, timedelta
 import random
@@ -61,7 +61,7 @@ ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7
 RO_ORIGIN_BASE_URL = "https://roglobal.com/api/store/game"
 RO_ORIGIN_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://roglobal.com",
+    "Accept": "*/*", "Origin": "https://roglobal.com",
     "Referer": "https://roglobal.com/shopStore/selectOrder/", "language": "en", "region": "singapore"
 }
 
@@ -232,9 +232,11 @@ def check_rom_xd_api(role_id):
 def verify_ro_origin_code(open_id):
     url = f"{RO_ORIGIN_BASE_URL}/account/verify"
     payload = {"open_id": open_id}
+    headers = RO_ORIGIN_HEADERS.copy()
+    headers['Content-Type'] = 'application/json'
     logging.info(f"Sending RO Origin Verify Code API: URL='{url}', Payload={json.dumps(payload)}")
     try:
-        response = requests.post(url, json=payload, headers=RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.post(url, json=payload, headers=headers, timeout=10, verify=certifi.where())
         data = response.json()
         if data.get("code") == 0 and data.get("data", {}).get("exist"):
             return {"status": "success", "message": "Code is valid."}
@@ -269,8 +271,8 @@ def get_ro_origin_roles(open_id, server_id):
 def home():
     return "NinjaTopUp API Backend is Live!"
 
-@app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None}, methods=['GET'])
-@app.route('/check-id/<game_slug>/<uid>/<server_id>', methods=['GET'])
+@app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None}, methods=['GET', 'OPTIONS'])
+@app.route('/check-id/<game_slug>/<uid>/<server_id>', methods=['GET', 'OPTIONS'])
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
     
@@ -304,6 +306,7 @@ def check_game_id(game_slug, uid, server_id):
     return jsonify(result), status_code
 
 @app.route('/ro-origin/verify-code', methods=['POST', 'OPTIONS'])
+@cross_origin(origins=allowed_origins, supports_credentials=True)
 def handle_ro_origin_verify():
     data = request.get_json()
     open_id = data.get('open_id')
@@ -312,6 +315,7 @@ def handle_ro_origin_verify():
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
 @app.route('/ro-origin/get-servers', methods=['POST', 'OPTIONS'])
+@cross_origin(origins=allowed_origins, supports_credentials=True)
 def handle_ro_origin_get_servers():
     data = request.get_json()
     open_id = data.get('open_id')
@@ -320,6 +324,7 @@ def handle_ro_origin_get_servers():
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
 @app.route('/ro-origin/get-roles', methods=['POST', 'OPTIONS'])
+@cross_origin(origins=allowed_origins, supports_credentials=True)
 def handle_ro_origin_get_roles():
     data = request.get_json()
     open_id = data.get('open_id')
