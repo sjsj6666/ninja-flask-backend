@@ -38,42 +38,34 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 BASE_URL = "https://www.gameuniverse.co" 
 
 # --- API Headers & Constants ---
-SMILE_ONE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
-    "Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    "Origin": "https://www.smile.one", "X-Requested-With": "XMLHttpRequest", "Cookie": os.environ.get("SMILE_ONE_COOKIE")
-}
+SMILE_ONE_HEADERS = { "User-Agent": "Mozilla/5.0...", "Accept": "application/json...", "Content-Type": "application/x-www-form-urlencoded...", "Origin": "https://www.smile.one", "X-Requested-With": "XMLHttpRequest", "Cookie": os.environ.get("SMILE_ONE_COOKIE")}
 BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
-BIGO_NATIVE_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/" }
+BIGO_NATIVE_HEADERS = { "User-Agent": "Mozilla/5.0...", "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/" }
 ENJOYGM_BASE_URL = "https://www.enjoygm.com/portal/supplier/api"
-ENJOYGM_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Referer": "https://www.enjoygm.com/" }
+ENJOYGM_HEADERS = { "User-Agent": "Mozilla/5.0...", "Accept": "*/*", "Referer": "https://www.enjoygm.com/" }
 RMTGAMESHOP_VALIDATE_URL = "https://rmtgameshop.com/game/checkid"
-RMTGAMESHOP_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://rmtgameshop.com", "Referer": "https://rmtgameshop.com/", "X-Auth-Token": "5a9cbf0b303b57f12e3da444f5d42c59" }
+RMTGAMESHOP_HEADERS = { "User-Agent": "Mozilla/5.0...", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://rmtgameshop.com", "Referer": "https://rmtgameshop.com/", "X-Auth-Token": "5a9cbf0b303b57f12e3da444f5d42c59" }
 SPACEGAMING_VALIDATE_URL = "https://spacegaming.sg/wp-json/endpoint/validate_v2"
-SPACEGAMING_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://spacegaming.sg", "Referer": "https://spacegaming.sg/" }
+SPACEGAMING_HEADERS = { "User-Agent": "Mozilla/5.0...", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://spacegaming.sg", "Referer": "https://spacegaming.sg/" }
 NETEASE_BASE_URL = "https://pay.neteasegames.com/gameclub"
-NETEASE_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Referer": "https://pay.neteasegames.com/"}
+NETEASE_HEADERS = {"User-Agent": "Mozilla/5.0...", "Accept": "application/json...", "Referer": "https://pay.neteasegames.com/"}
 RAZER_BASE_URL = "https://gold.razer.com/api/ext/custom"
-RAZER_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*"}
+RAZER_HEADERS = {"User-Agent": "Mozilla/5.0...", "Accept": "application/json..."}
 NUVERSE_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
 NUVERSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
 ROM_XD_VALIDATE_URL = "https://xdsdk-intnl-6.xd.com/product/v1/query/game/role"
-ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
-RO_ORIGIN_BASE_URL = "https://roglobal.com/api/store/game"
-RO_ORIGIN_BASE_HEADERS = {
+ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0...", "Accept": "application/json...", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
+RO_ORIGIN_ONEONE_BASE_URL = "https://games.oneone.com/games/ro-global/api"
+RO_ORIGIN_ONEONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "*/*", "Origin": "https://roglobal.com",
-    "Referer": "https://roglobal.com/shopStore/selectOrder/", "language": "en", "region": "singapore"
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    "Origin": "https://games.oneone.com",
+    "Referer": "https://games.oneone.com/games/ragnarok-origin-global"
 }
 
 
 # --- Helper Functions for ID Validation ---
-
-def generate_ro_origin_signature(params):
-    secret_key = "a8*!^@2&"
-    sorted_params = sorted(params.items())
-    param_string = "".join([f"{k}{v}" for k, v in sorted_params]) + secret_key
-    return hashlib.md5(param_string.encode('utf-8')).hexdigest()
 
 def perform_ml_check(user_id, zone_id):
     try:
@@ -236,65 +228,35 @@ def check_rom_xd_api(role_id):
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
-def verify_ro_origin_code(open_id):
-    url = f"{RO_ORIGIN_BASE_URL}/account/verify"
-    payload = {"open_id": open_id}
-    headers = RO_ORIGIN_BASE_HEADERS.copy()
-    headers['Content-Type'] = 'application/json'
-    timestamp = str(int(time.time()))
-    headers['timestamp'] = timestamp
-    sign_payload = json.dumps(payload, separators=(',', ':'))
-    headers['sign'] = hashlib.md5((sign_payload + timestamp + "a8*!^@2&").encode('utf-8')).hexdigest()
-    
-    logging.info(f"Sending RO Origin Verify Code API: URL='{url}', Headers={headers}, Payload={json.dumps(payload)}")
+def get_ro_origin_oneone_servers():
+    url = f"{RO_ORIGIN_ONEONE_BASE_URL}/getServers"
+    logging.info(f"Sending RO Origin Get Servers API (oneone): URL='{url}'")
     try:
-        response = requests.post(url, json=payload, headers=headers, timeout=10, verify=certifi.where())
+        response = requests.post(url, headers=RO_ORIGIN_ONEONE_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
-        if data.get("code") == 0 and data.get("data", {}).get("exist"):
-            return {"status": "success", "message": "Code is valid."}
-        return {"status": "error", "message": "Invalid Secret Code."}
-    except Exception as e: return {"status": "error", "message": "API Error"}
-
-def get_ro_origin_servers(open_id):
-    params = {"open_id": open_id}
-    url = f"{RO_ORIGIN_BASE_URL}/servers"
-    headers = RO_ORIGIN_BASE_HEADERS.copy()
-    timestamp = str(int(time.time()))
-    headers['timestamp'] = timestamp
-    headers['sign'] = generate_ro_origin_signature({**params, "timestamp": timestamp})
-
-    logging.info(f"Sending RO Origin Get Servers API: URL='{url}', Headers={headers}, Params={params}")
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=10, verify=certifi.where())
-        data = response.json()
-        if data.get("code") == 0 and "list" in data.get("data", {}):
-            return {"status": "success", "servers": data["data"]["list"]}
+        if isinstance(data, list):
+            return {"status": "success", "servers": data}
         return {"status": "error", "message": "Could not fetch servers."}
-    except Exception as e: return {"status": "error", "message": "API Error"}
+    except Exception as e:
+        logging.error(f"RO Origin Get Servers API error (oneone): {e}")
+        return {"status": "error", "message": "API Error"}
 
-def get_ro_origin_roles(open_id, server_id):
-    params = {"open_id": open_id, "server_id": server_id}
-    url = f"{RO_ORIGIN_BASE_URL}/server/roles"
-    headers = RO_ORIGIN_BASE_HEADERS.copy()
-    timestamp = str(int(time.time()))
-    headers['timestamp'] = timestamp
-    headers['sign'] = generate_ro_origin_signature({**params, "timestamp": timestamp})
-
-    logging.info(f"Sending RO Origin Get Roles API: URL='{url}', Headers={headers}, Params={params}")
+def get_ro_origin_oneone_roles(uid, server_id):
+    url = f"{RO_ORIGIN_ONEONE_BASE_URL}/getRoles"
+    payload = {"userId": uid, "serverId": server_id}
+    logging.info(f"Sending RO Origin Get Roles API (oneone): URL='{url}', Payload={json.dumps(payload)}")
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=10, verify=certifi.where())
+        response = requests.post(url, json=payload, headers=RO_ORIGIN_ONEONE_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
-        if data.get("code") == 0 and "list" in data.get("data", {}):
-            return {"status": "success", "roles": data["data"]["list"]}
-        return {"status": "error", "message": "Could not fetch roles."}
-    except Exception as e: return {"status": "error", "message": "API Error"}
+        if isinstance(data, list):
+            return {"status": "success", "roles": data}
+        return {"status": "error", "message": data.get("message", "Could not fetch roles.")}
+    except Exception as e:
+        logging.error(f"RO Origin Get Roles API error (oneone): {e}")
+        return {"status": "error", "message": "API Error"}
 
 
 # --- Flask Routes ---
-@app.route('/')
-def home():
-    return "NinjaTopUp API Backend is Live!"
-
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
 @cross_origin(origins=allowed_origins, supports_credentials=True)
@@ -330,32 +292,21 @@ def check_game_id(game_slug, uid, server_id):
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
-@app.route('/ro-origin/verify-code', methods=['POST', 'OPTIONS'])
-@cross_origin(origins=allowed_origins, supports_credentials=True)
-def handle_ro_origin_verify():
-    data = request.get_json()
-    open_id = data.get('open_id')
-    if not open_id: return jsonify({"status": "error", "message": "Secret Code is required."}), 400
-    result = verify_ro_origin_code(open_id)
-    return jsonify(result), 200 if result.get("status") == "success" else 400
-
-@app.route('/ro-origin/get-servers', methods=['POST', 'OPTIONS'])
+@app.route('/ro-origin/get-servers', methods=['GET', 'OPTIONS']) # Changed to GET
 @cross_origin(origins=allowed_origins, supports_credentials=True)
 def handle_ro_origin_get_servers():
-    data = request.get_json()
-    open_id = data.get('open_id')
-    if not open_id: return jsonify({"status": "error", "message": "Secret Code is required."}), 400
-    result = get_ro_origin_servers(open_id)
+    result = get_ro_origin_oneone_servers()
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
 @app.route('/ro-origin/get-roles', methods=['POST', 'OPTIONS'])
 @cross_origin(origins=allowed_origins, supports_credentials=True)
 def handle_ro_origin_get_roles():
     data = request.get_json()
-    open_id = data.get('open_id')
-    server_id = data.get('server_id')
-    if not open_id or not server_id: return jsonify({"status": "error", "message": "Secret Code and Server ID are required."}), 400
-    result = get_ro_origin_roles(open_id, server_id)
+    uid = data.get('userId')
+    server_id = data.get('serverId')
+    if not uid or not server_id:
+        return jsonify({"status": "error", "message": "Secret Code and Server ID are required."}), 400
+    result = get_ro_origin_oneone_roles(uid, server_id)
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
 @app.route('/sitemap.xml')
