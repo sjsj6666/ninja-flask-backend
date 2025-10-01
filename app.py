@@ -232,7 +232,6 @@ def check_rom_xd_api(role_id):
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
-# *** MODIFIED FUNCTION: NOW RETURNS A STATIC LIST ***
 def get_ro_origin_oneone_servers():
     logging.info("Returning hardcoded RO Origin server list.")
     servers_list = [
@@ -249,17 +248,49 @@ def get_ro_origin_oneone_servers():
     ]
     return {"status": "success", "servers": servers_list}
 
+# *** MODIFIED FUNCTION TO HANDLE CSRF TOKEN ***
 def get_ro_origin_oneone_roles(uid, server_id):
     url = f"{RO_ORIGIN_ONEONE_BASE_URL}/getRoles"
     payload = {"userId": uid, "serverId": server_id}
     logging.info(f"Sending RO Origin Get Roles API (oneone): URL='{url}', Payload={json.dumps(payload)}")
+    
     try:
-        response = requests.post(url, json=payload, headers=RO_ORIGIN_ONEONE_HEADERS, timeout=10, verify=certifi.where())
-        data = response.json()
-        if isinstance(data, list):
-            return {"status": "success", "roles": data}
-        return {"status": "error", "message": data.get("message", "Could not fetch roles.")}
+        # Use a session to persist cookies
+        with requests.Session() as s:
+            # First, visit the main page to get the necessary session cookies
+            s.get("https://games.oneone.com/games/ragnarok-origin-global", headers=RO_ORIGIN_ONEONE_HEADERS, timeout=10)
+            
+            # Now, make the POST request. The session will automatically include the cookies.
+            # We need to find the X-CSRF-TOKEN from the cookies.
+            xsrf_token = s.cookies.get('XSRF-TOKEN')
+            if not xsrf_token:
+                # If the cookie isn't found, we might need a fallback or to raise an error
+                logging.error("Could not retrieve XSRF-TOKEN cookie.")
+                return {"status": "error", "message": "Could not initiate session."}
+            
+            # Add the CSRF token to the headers for the POST request
+            post_headers = RO_ORIGIN_ONEONE_HEADERS.copy()
+            post_headers['X-CSRF-TOKEN'] = requests.utils.unquote(xsrf_token)
+
+            response = s.post(url, json=payload, headers=post_headers, timeout=10, verify=certifi.where())
+            
+            # Check for a successful response
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, list):
+                    return {"status": "success", "roles": data}
+                # Check if the response contains the CSRF error message
+                elif 'message' in data and 'CSRF token mismatch' in data['message']:
+                     return {"status": "error", "message": "CSRF token mismatch."}
+                else:
+                    return {"status": "error", "message": data.get("message", "Could not fetch roles.")}
+            else:
+                # Handle non-200 responses
+                logging.error(f"RO Origin API returned status {response.status_code}: {response.text}")
+                return {"status": "error", "message": "API returned an error status."}
+            
     except Exception as e:
+        logging.error(f"Exception in get_ro_origin_oneone_roles: {e}")
         return {"status": "error", "message": "API Error"}
 
 
