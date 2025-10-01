@@ -64,59 +64,49 @@ ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7
 
 def perform_ml_check(user_id, zone_id):
     try:
-        logging.info(f"Attempting primary ML API (caliph.dev) for user: {user_id}")
+        logging.info(f"Attempting primary ML API for user: {user_id}")
         api_url = "https://cekidml.caliph.dev/api/validasi"
         params = {'id': user_id, 'serverid': zone_id}
         response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7)
         if response.status_code == 200:
-            response_data = response.json()
-            if response_data.get("status") == "success" and response_data.get("result", {}).get("nickname"):
-                nickname = response_data["result"]["nickname"]
-                country_name = response_data["result"].get("country")
+            data = response.json()
+            if data.get("status") == "success" and data.get("result", {}).get("nickname"):
+                nickname = data["result"]["nickname"]
                 country_code = "N/A"
-                if country_name:
-                    try:
-                        country = pycountry.countries.get(name=country_name)
-                        if country: country_code = country.alpha_2
-                    except Exception: pass
-                logging.info(f"Primary ML API Success! Nickname: {nickname}, Region: {country_code}")
+                try:
+                    country = pycountry.countries.get(name=data["result"].get("country"))
+                    if country: country_code = country.alpha_2
+                except Exception: pass
                 return {'status': 'success', 'username': nickname, 'region': country_code}
         logging.warning("Primary ML API failed. Proceeding to fallback.")
-    except Exception as e:
-        logging.error(f"Primary ML API exception: {e}. Proceeding to fallback.")
-    logging.info(f"Attempting fallback ML API (Smile.One) for user: {user_id}")
+    except Exception:
+        logging.error("Primary ML API exception. Proceeding to fallback.")
     fallback_result = check_smile_one_api("mobilelegends", user_id, zone_id)
     if fallback_result.get("status") == "success": fallback_result['region'] = 'N/A'
     return fallback_result
 
 def check_smile_one_api(game_code, uid, server_id=None):
-    endpoints = {
-        "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", 
-        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
-        "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"
-    }
+    endpoints = { "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"}
     pids = {"mobilelegends": "25", "bloodstrike": "20295"}
-    if game_code not in endpoints: return {"status": "error", "message": "Game not configured for SmileOne."}
-    url = endpoints[game_code]
+    if game_code not in endpoints: return {"status": "error", "message": f"Game not configured: {game_code}"}
+    
     pid_to_use = pids.get(game_code)
     if game_code == "loveanddeepspace":
-        server_pid_map = {"81": "18760", "82": "18762", "83": "18762"}
-        pid_to_use = server_pid_map.get(str(server_id))
-    if not pid_to_use: return {"status": "error", "message": "Could not resolve product ID for this server."}
+        pid_to_use = {"81": "18760", "82": "18762", "83": "18762"}.get(str(server_id))
+    if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
+        
     params = {"pid": pid_to_use, "checkrole": "1"}
     if game_code == "mobilelegends": params.update({"user_id": uid, "zone_id": server_id})
     elif game_code == "bloodstrike": params.update({"uid": uid, "sid": "-1"})
     else: params.update({"uid": uid, "sid": server_id})
+    
     logging.info(f"Sending SmileOne API: Game='{game_code}', Params={params}")
     try:
-        response = requests.post(url, data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
-        if "nickname" in response.text and response.headers.get('content-type', '').startswith('text/html'):
-            try:
-                start_idx = response.text.find('{"nickname":"') + len('{"nickname":"')
-                end_idx = response.text.find('"', start_idx)
-                username = response.text[start_idx:end_idx]
-                return {"status": "success", "username": username}
-            except Exception: pass
+        response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
+        if "nickname" in response.text and "text/html" in response.headers.get('content-type', ''):
+            start_idx = response.text.find('{"nickname":"') + len('{"nickname":"')
+            end_idx = response.text.find('"', start_idx)
+            return {"status": "success", "username": response.text[start_idx:end_idx]}
         data = response.json()
         if data.get("code") == 200:
             username = data.get("username") or data.get("nickname")
@@ -128,7 +118,7 @@ def check_smile_one_api(game_code, uid, server_id=None):
 
 def check_bigo_native_api(uid):
     params = {"isFromApp": "0", "bigoId": uid}
-    logging.info(f"Sending Bigo Native API: URL='{BIGO_NATIVE_VALIDATE_URL}', Params={params}")
+    logging.info(f"Sending Bigo API: Params={params}")
     try:
         response = requests.get(BIGO_NATIVE_VALIDATE_URL, params=params, headers=BIGO_NATIVE_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
@@ -138,14 +128,11 @@ def check_bigo_native_api(uid):
     except Exception: return {"status": "error", "message": "API Error (Bigo)"}
 
 def check_enjoygm_api(game_path, uid, server_id=None):
-    url = f"{ENJOYGM_BASE_URL}/{game_path}/userinfo"
     params = {"account": uid}
     if server_id: params["serverid"] = server_id
-    headers = ENJOYGM_HEADERS.copy()
-    headers["Referer"] = f"https://www.enjoygm.com/top-up/{game_path}"
-    logging.info(f"Sending EnjoyGM API: URL='{url}', Params={params}")
+    logging.info(f"Sending EnjoyGM API: Game='{game_path}', Params={params}")
     try:
-        response = requests.get(url, params=params, headers=headers, timeout=10, verify=certifi.where())
+        response = requests.get(f"{ENJOYGM_BASE_URL}/{game_path}/userinfo", params=params, headers=ENJOYGM_HEADERS, timeout=10, verify=certifi.where())
         outer_data = response.json()
         if outer_data.get("code") == 200 and outer_data.get("data"):
             inner_data = json.loads(outer_data["data"])
@@ -158,7 +145,7 @@ def check_enjoygm_api(game_path, uid, server_id=None):
 def check_rmtgameshop_api(game_code, uid, server_id=None):
     payload = {"game": game_code, "id": uid}
     if server_id: payload["server"] = server_id
-    logging.info(f"Sending RMTGameShop API: URL='{RMTGAMESHOP_VALIDATE_URL}', Payload={json.dumps(payload)}")
+    logging.info(f"Sending RMTGameShop API: Payload={json.dumps(payload)}")
     try:
         response = requests.post(RMTGAMESHOP_VALIDATE_URL, json=payload, headers=RMTGAMESHOP_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
@@ -166,25 +153,24 @@ def check_rmtgameshop_api(game_code, uid, server_id=None):
             nickname = data.get("data", {}).get("nickname")
             if nickname: return {"status": "success", "username": nickname.strip()}
         return {"status": "error", "message": data.get("message", "Invalid Player ID.")}
-    except Exception as e: return {"status": "error", "message": f"API Error ({game_code})"}
+    except Exception: return {"status": "error", "message": f"API Error ({game_code})"}
 
-def check_spacegaming_api(game_id_for_api, uid):
-    payload = {"username": uid, "game_id": game_id_for_api}
-    logging.info(f"Sending SpaceGaming API: URL='{SPACEGAMING_VALIDATE_URL}', Payload={json.dumps(payload)}")
+def check_spacegaming_api(game_id, uid):
+    payload = {"username": uid, "game_id": game_id}
+    logging.info(f"Sending SpaceGaming API: Payload={json.dumps(payload)}")
     try:
         response = requests.post(SPACEGAMING_VALIDATE_URL, json=payload, headers=SPACEGAMING_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
         if data.get("status") == "true" and data.get("message"):
             return {"status": "success", "username": data["message"].strip()}
         return {"status": "error", "message": "Invalid Player ID."}
-    except Exception as e: return {"status": "error", "message": f"API Error ({game_id_for_api})"}
+    except Exception: return {"status": "error", "message": f"API Error ({game_id})"}
 
 def check_netease_api(game_path, server_id, role_id):
-    url = f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role"
     params = {"roleid": role_id, "timestamp": int(time.time() * 1000)}
-    logging.info(f"Sending Netease API: URL='{url}', Params={params}")
+    logging.info(f"Sending Netease API: Game='{game_path}', Params={params}")
     try:
-        response = requests.get(url, params=params, headers=NETEASE_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.get(f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role", params=params, headers=NETEASE_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
         if data.get("code") == "0000":
             username = data.get("data", {}).get("rolename")
@@ -193,11 +179,10 @@ def check_netease_api(game_path, server_id, role_id):
     except Exception: return {"status": "error", "message": "API Error (Netease)"}
 
 def check_razer_api(game_path, uid, server_id):
-    url = f"{RAZER_BASE_URL}/{game_path}/users/{uid}"
     params = {"serverId": server_id}
-    logging.info(f"Sending Razer API: URL='{url}', Params={params}")
+    logging.info(f"Sending Razer API: Game='{game_path}', Params={params}")
     try:
-        response = requests.get(url, params=params, headers=RAZER_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.get(f"{RAZER_BASE_URL}/{game_path}/users/{uid}", params=params, headers=RAZER_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
         if response.status_code == 200 and data.get("username"):
             return {"status": "success", "username": data["username"].strip()}
@@ -206,7 +191,7 @@ def check_razer_api(game_path, uid, server_id):
 
 def check_nuverse_api(aid, role_id):
     params = {"tab": "purchase", "aid": aid, "role_id": role_id}
-    logging.info(f"Sending Nuverse API: URL='{NUVERSE_VALIDATE_URL}', Params={params}")
+    logging.info(f"Sending Nuverse API: Params={params}")
     try:
         response = requests.get(NUVERSE_VALIDATE_URL, params=params, headers=NUVERSE_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
@@ -214,14 +199,13 @@ def check_nuverse_api(aid, role_id):
             role_info = data.get("data", [{}])[0]
             username = role_info.get("role_name")
             server_name = role_info.get("server_name")
-            if username and server_name:
-                return {"status": "success", "username": f"{username} ({server_name})"}
+            if username and server_name: return {"status": "success", "username": f"{username} ({server_name})"}
         return {"status": "error", "message": "Invalid Player ID."}
     except Exception: return {"status": "error", "message": "API Error (Nuverse)"}
 
 def check_rom_xd_api(role_id):
-    params = {"source": "webpay", "pt": "macOS", "appId": "2079001", "serverId": "50001", "roleId": role_id}
-    logging.info(f"Sending ROM XD API: URL='{ROM_XD_VALIDATE_URL}', Params={params}")
+    params = {"source": "webpay", "appId": "2079001", "serverId": "50001", "roleId": role_id}
+    logging.info(f"Sending ROM XD API: Params={params}")
     try:
         response = requests.get(ROM_XD_VALIDATE_URL, params=params, headers=ROM_XD_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
@@ -229,13 +213,10 @@ def check_rom_xd_api(role_id):
             username = data.get("data", {}).get("name")
             if username: return {"status": "success", "username": username.strip()}
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
-    except Exception as e: return {"status": "error", "message": "API Error (ROM)"}
+    except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
 
 # --- Flask Routes ---
-@app.route('/')
-def home(): return "NinjaTopUp API Backend is Live!"
-
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug>/<uid>/<server_id>', methods=['GET'])
 def check_game_id(game_slug, uid, server_id):
