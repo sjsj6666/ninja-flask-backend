@@ -63,36 +63,137 @@ ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7
 # --- Helper Functions for ID Validation ---
 
 def perform_ml_check(user_id, zone_id):
-    # ... (code is unchanged) ...
+    try:
+        logging.info(f"Attempting primary ML API for user: {user_id}")
+        api_url = "https://cekidml.caliph.dev/api/validasi"
+        params = {'id': user_id, 'serverid': zone_id}
+        response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "success" and data.get("result", {}).get("nickname"):
+                nickname = data["result"]["nickname"]
+                country_code = "N/A"
+                try:
+                    country = pycountry.countries.get(name=data["result"].get("country"))
+                    if country: country_code = country.alpha_2
+                except Exception: pass
+                return {'status': 'success', 'username': nickname, 'region': country_code}
+        logging.warning("Primary ML API failed. Proceeding to fallback.")
+    except Exception:
+        logging.error("Primary ML API exception. Proceeding to fallback.")
+    fallback_result = check_smile_one_api("mobilelegends", user_id, zone_id)
+    if fallback_result.get("status") == "success": fallback_result['region'] = 'N/A'
+    return fallback_result
 
 def check_smile_one_api(game_code, uid, server_id=None):
-    # ... (code is unchanged) ...
+    endpoints = {
+        "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", 
+        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
+        "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"
+    }
+    pids = {"mobilelegends": "25", "bloodstrike": "20295"}
+    if game_code not in endpoints: return {"status": "error", "message": f"Game not configured: {game_code}"}
+    
+    pid_to_use = pids.get(game_code)
+    if game_code == "loveanddeepspace":
+        server_pid_map = {"America": "18760", "Asia": "18762", "Europe": "18762"}
+        pid_to_use = server_pid_map.get(str(server_id))
+    if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
+        
+    params = {"pid": pid_to_use, "checkrole": "1"}
+    if game_code == "mobilelegends": params.update({"user_id": uid, "zone_id": server_id})
+    elif game_code == "bloodstrike": params.update({"uid": uid, "sid": "-1"})
+    else: params.update({"uid": uid, "sid": server_id})
+    
+    logging.info(f"Sending SmileOne API: Game='{game_code}', Params={params}")
+    try:
+        response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
+        if "nickname" in response.text and "text/html" in response.headers.get('content-type', ''):
+            try:
+                start_idx = response.text.find('{"nickname":"') + len('{"nickname":"')
+                end_idx = response.text.find('"', start_idx)
+                return {"status": "success", "username": response.text[start_idx:end_idx]}
+            except Exception: pass
+        data = response.json()
+        if data.get("code") == 200:
+            username = data.get("username") or data.get("nickname")
+            if username: return {"status": "success", "username": username.strip()}
+        error_message = data.get("message", data.get("info", "Invalid ID."))
+        if "não existe" in error_message: error_message = "Invalid User ID."
+        return {"status": "error", "message": error_message}
+    except Exception: return {"status": "error", "message": "API Error (SmileOne)"}
 
 def check_bigo_native_api(uid):
-    # ... (code is unchanged) ...
+    params = {"isFromApp": "0", "bigoId": uid}
+    logging.info(f"Sending Bigo API: Params={params}")
+    try:
+        response = requests.get(BIGO_NATIVE_VALIDATE_URL, params=params, headers=BIGO_NATIVE_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("result") == 0 and data.get("data", {}).get("nick_name"):
+            return {"status": "success", "username": data["data"]["nick_name"].strip()}
+        return {"status": "error", "message": data.get("errorMsg", "Invalid Bigo ID.")}
+    except Exception: return {"status": "error", "message": "API Error (Bigo)"}
 
 def check_enjoygm_api(game_path, uid, server_id=None):
-    # ... (code is unchanged) ...
+    params = {"account": uid}
+    if server_id: params["serverid"] = server_id
+    logging.info(f"Sending EnjoyGM API: Game='{game_path}', Params={params}")
+    try:
+        response = requests.get(f"{ENJOYGM_BASE_URL}/{game_path}/userinfo", params=params, headers=ENJOYGM_HEADERS, timeout=10, verify=certifi.where())
+        outer_data = response.json()
+        if outer_data.get("code") == 200 and outer_data.get("data"):
+            inner_data = json.loads(outer_data["data"])
+            username = inner_data.get("accountName") or inner_data.get("username")
+            if (inner_data.get("exist") == 1 or inner_data.get("username")) and username:
+                return {"status": "success", "username": username.strip()}
+        return {"status": "error", "message": "Invalid ID or Server."}
+    except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
 
 def check_rmtgameshop_api(game_code, uid, server_id=None):
-    # ... (code is unchanged) ...
+    payload = {"game": game_code, "id": uid}
+    if server_id: payload["server"] = server_id
+    logging.info(f"Sending RMTGameShop API: Payload={json.dumps(payload)}")
+    try:
+        response = requests.post(RMTGAMESHOP_VALIDATE_URL, json=payload, headers=RMTGAMESHOP_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if not data.get("error") and data.get("code") == 200:
+            nickname = data.get("data", {}).get("nickname")
+            if nickname: return {"status": "success", "username": nickname.strip()}
+        return {"status": "error", "message": data.get("message", "Invalid Player ID.")}
+    except Exception: return {"status": "error", "message": f"API Error ({game_code})"}
 
 def check_spacegaming_api(game_id, uid):
-    # ... (code is unchanged) ...
+    payload = {"username": uid, "game_id": game_id}
+    logging.info(f"Sending SpaceGaming API: Payload={json.dumps(payload)}")
+    try:
+        response = requests.post(SPACEGAMING_VALIDATE_URL, json=payload, headers=SPACEGAMING_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("status") == "true" and data.get("message"):
+            return {"status": "success", "username": data["message"].strip()}
+        return {"status": "error", "message": "Invalid Player ID."}
+    except Exception: return {"status": "error", "message": f"API Error ({game_id})"}
 
 def check_netease_api(game_path, server_id, role_id):
-    # ... (code is unchanged) ...
+    params = { "deviceid": "156032181698579111", "traceid": str(uuid.uuid4()), "timestamp": int(time.time() * 1000), "gc_client_version": "1.11.4", "roleid": role_id, "client_type": "gameclub" }
+    current_headers = NETEASE_HEADERS.copy()
+    current_headers['X-TASK-ID'] = f"transid={params['traceid']},uni_transaction_id=default"
+    logging.info(f"Sending Netease API: Game='{game_path}', Params={params}")
+    try:
+        response = requests.get(f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role", params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == "0000":
+            username = data.get("data", {}).get("rolename")
+            if username: return {"status": "success", "username": username.strip()}
+        return {"status": "error", "message": "Invalid ID or Server."}
+    except Exception: return {"status": "error", "message": "API Error (Netease)"}
 
 def check_razer_api(game_path, uid, server_id):
-    url = f"{RAZER_BASE_URL}/{game_path}/users/{uid}"
     params = {"serverId": server_id}
-    # THE FIX IS HERE: Create a copy of the base headers and add the specific Referer
     current_headers = RAZER_HEADERS.copy()
     current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{game_path.split('/')[-1]}"
-    
-    logging.info(f"Sending Razer API: URL='{url}', Params={params}")
+    logging.info(f"Sending Razer API: Game='{game_path}', Params={params}")
     try:
-        response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        response = requests.get(f"{RAZER_BASE_URL}/{game_path}/users/{uid}", params=params, headers=current_headers, timeout=10, verify=certifi.where())
         data = response.json()
         if response.status_code == 200 and data.get("username"):
             return {"status": "success", "username": data["username"].strip()}
@@ -101,10 +202,30 @@ def check_razer_api(game_path, uid, server_id):
     except Exception: return {"status": "error", "message": "API Error (Razer)"}
 
 def check_nuverse_api(aid, role_id):
-    # ... (code is unchanged) ...
+    params = {"tab": "purchase", "aid": aid, "role_id": role_id}
+    logging.info(f"Sending Nuverse API: Params={params}")
+    try:
+        response = requests.get(NUVERSE_VALIDATE_URL, params=params, headers=NUVERSE_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 0 and data.get("message", "").lower() == "success":
+            role_info = data.get("data", [{}])[0]
+            username = role_info.get("role_name")
+            server_name = role_info.get("server_name")
+            if username and server_name: return {"status": "success", "username": f"{username} ({server_name})"}
+        return {"status": "error", "message": "Invalid Player ID."}
+    except Exception: return {"status": "error", "message": "API Error (Nuverse)"}
 
 def check_rom_xd_api(role_id):
-    # ... (code is unchanged) ...
+    params = {"source": "webpay", "appId": "2079001", "serverId": "50001", "roleId": role_id}
+    logging.info(f"Sending ROM XD API: Params={params}")
+    try:
+        response = requests.get(ROM_XD_VALIDATE_URL, params=params, headers=ROM_XD_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 200:
+            username = data.get("data", {}).get("name")
+            if username: return {"status": "success", "username": username.strip()}
+        return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
+    except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
 
 # --- Flask Routes ---
