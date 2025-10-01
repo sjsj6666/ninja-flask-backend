@@ -7,6 +7,7 @@ import base64
 import requests
 import certifi
 import pycountry
+import hashlib
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS, cross_origin
 from supabase import create_client, Client
@@ -59,7 +60,7 @@ NUVERSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
 ROM_XD_VALIDATE_URL = "https://xdsdk-intnl-6.xd.com/product/v1/query/game/role"
 ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
 RO_ORIGIN_BASE_URL = "https://roglobal.com/api/store/game"
-RO_ORIGIN_HEADERS = {
+RO_ORIGIN_BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "*/*", "Origin": "https://roglobal.com",
     "Referer": "https://roglobal.com/shopStore/selectOrder/", "language": "en", "region": "singapore"
@@ -67,6 +68,12 @@ RO_ORIGIN_HEADERS = {
 
 
 # --- Helper Functions for ID Validation ---
+
+def generate_ro_origin_signature(params):
+    secret_key = "a8*!^@2&"
+    sorted_params = sorted(params.items())
+    param_string = "".join([f"{k}{v}" for k, v in sorted_params]) + secret_key
+    return hashlib.md5(param_string.encode('utf-8')).hexdigest()
 
 def perform_ml_check(user_id, zone_id):
     try:
@@ -232,9 +239,14 @@ def check_rom_xd_api(role_id):
 def verify_ro_origin_code(open_id):
     url = f"{RO_ORIGIN_BASE_URL}/account/verify"
     payload = {"open_id": open_id}
-    headers = RO_ORIGIN_HEADERS.copy()
+    headers = RO_ORIGIN_BASE_HEADERS.copy()
     headers['Content-Type'] = 'application/json'
-    logging.info(f"Sending RO Origin Verify Code API: URL='{url}', Payload={json.dumps(payload)}")
+    timestamp = str(int(time.time()))
+    headers['timestamp'] = timestamp
+    sign_payload = json.dumps(payload, separators=(',', ':'))
+    headers['sign'] = hashlib.md5((sign_payload + timestamp + "a8*!^@2&").encode('utf-8')).hexdigest()
+    
+    logging.info(f"Sending RO Origin Verify Code API: URL='{url}', Headers={headers}, Payload={json.dumps(payload)}")
     try:
         response = requests.post(url, json=payload, headers=headers, timeout=10, verify=certifi.where())
         data = response.json()
@@ -244,10 +256,16 @@ def verify_ro_origin_code(open_id):
     except Exception as e: return {"status": "error", "message": "API Error"}
 
 def get_ro_origin_servers(open_id):
-    url = f"{RO_ORIGIN_BASE_URL}/servers?open_id={open_id}"
-    logging.info(f"Sending RO Origin Get Servers API: URL='{url}'")
+    params = {"open_id": open_id}
+    url = f"{RO_ORIGIN_BASE_URL}/servers"
+    headers = RO_ORIGIN_BASE_HEADERS.copy()
+    timestamp = str(int(time.time()))
+    headers['timestamp'] = timestamp
+    headers['sign'] = generate_ro_origin_signature({**params, "timestamp": timestamp})
+
+    logging.info(f"Sending RO Origin Get Servers API: URL='{url}', Headers={headers}, Params={params}")
     try:
-        response = requests.get(url, headers=RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.get(url, params=params, headers=headers, timeout=10, verify=certifi.where())
         data = response.json()
         if data.get("code") == 0 and "list" in data.get("data", {}):
             return {"status": "success", "servers": data["data"]["list"]}
@@ -255,10 +273,16 @@ def get_ro_origin_servers(open_id):
     except Exception as e: return {"status": "error", "message": "API Error"}
 
 def get_ro_origin_roles(open_id, server_id):
-    url = f"{RO_ORIGIN_BASE_URL}/server/roles?open_id={open_id}&server_id={server_id}"
-    logging.info(f"Sending RO Origin Get Roles API: URL='{url}'")
+    params = {"open_id": open_id, "server_id": server_id}
+    url = f"{RO_ORIGIN_BASE_URL}/server/roles"
+    headers = RO_ORIGIN_BASE_HEADERS.copy()
+    timestamp = str(int(time.time()))
+    headers['timestamp'] = timestamp
+    headers['sign'] = generate_ro_origin_signature({**params, "timestamp": timestamp})
+
+    logging.info(f"Sending RO Origin Get Roles API: URL='{url}', Headers={headers}, Params={params}")
     try:
-        response = requests.get(url, headers=RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.get(url, params=params, headers=headers, timeout=10, verify=certifi.where())
         data = response.json()
         if data.get("code") == 0 and "list" in data.get("data", {}):
             return {"status": "success", "roles": data["data"]["list"]}
@@ -271,8 +295,9 @@ def get_ro_origin_roles(open_id, server_id):
 def home():
     return "NinjaTopUp API Backend is Live!"
 
-@app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None}, methods=['GET', 'OPTIONS'])
-@app.route('/check-id/<game_slug>/<uid>/<server_id>', methods=['GET', 'OPTIONS'])
+@app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
+@app.route('/check-id/<game_slug>/<uid>/<server_id>')
+@cross_origin(origins=allowed_origins, supports_credentials=True)
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
     
