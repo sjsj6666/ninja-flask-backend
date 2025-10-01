@@ -58,6 +58,12 @@ NUVERSE_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
 NUVERSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
 ROM_XD_VALIDATE_URL = "https://xdsdk-intnl-6.xd.com/product/v1/query/game/role"
 ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
+RO_ORIGIN_BASE_URL = "https://roglobal.com/api/store/game"
+RO_ORIGIN_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+    "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://roglobal.com",
+    "Referer": "https://roglobal.com/shopStore/selectOrder/", "language": "en", "region": "singapore"
+}
 
 
 # --- Helper Functions for ID Validation ---
@@ -86,11 +92,7 @@ def perform_ml_check(user_id, zone_id):
     return fallback_result
 
 def check_smile_one_api(game_code, uid, server_id=None):
-    endpoints = {
-        "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", 
-        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
-        "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"
-    }
+    endpoints = { "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"}
     pids = {"mobilelegends": "25", "bloodstrike": "20295"}
     if game_code not in endpoints: return {"status": "error", "message": f"Game not configured: {game_code}"}
     
@@ -227,6 +229,40 @@ def check_rom_xd_api(role_id):
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
+def verify_ro_origin_code(open_id):
+    url = f"{RO_ORIGIN_BASE_URL}/account/verify"
+    payload = {"open_id": open_id}
+    logging.info(f"Sending RO Origin Verify Code API: URL='{url}', Payload={json.dumps(payload)}")
+    try:
+        response = requests.post(url, json=payload, headers=RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 0 and data.get("data", {}).get("exist"):
+            return {"status": "success", "message": "Code is valid."}
+        return {"status": "error", "message": "Invalid Secret Code."}
+    except Exception as e: return {"status": "error", "message": "API Error"}
+
+def get_ro_origin_servers(open_id):
+    url = f"{RO_ORIGIN_BASE_URL}/servers?open_id={open_id}"
+    logging.info(f"Sending RO Origin Get Servers API: URL='{url}'")
+    try:
+        response = requests.get(url, headers=RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 0 and "list" in data.get("data", {}):
+            return {"status": "success", "servers": data["data"]["list"]}
+        return {"status": "error", "message": "Could not fetch servers."}
+    except Exception as e: return {"status": "error", "message": "API Error"}
+
+def get_ro_origin_roles(open_id, server_id):
+    url = f"{RO_ORIGIN_BASE_URL}/server/roles?open_id={open_id}&server_id={server_id}"
+    logging.info(f"Sending RO Origin Get Roles API: URL='{url}'")
+    try:
+        response = requests.get(url, headers=RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 0 and "list" in data.get("data", {}):
+            return {"status": "success", "roles": data["data"]["list"]}
+        return {"status": "error", "message": "Could not fetch roles."}
+    except Exception as e: return {"status": "error", "message": "API Error"}
+
 
 # --- Flask Routes ---
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None}, methods=['GET'])
@@ -262,6 +298,31 @@ def check_game_id(game_slug, uid, server_id):
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
+
+@app.route('/ro-origin/verify-code', methods=['POST'])
+def handle_ro_origin_verify():
+    data = request.get_json()
+    open_id = data.get('open_id')
+    if not open_id: return jsonify({"status": "error", "message": "Secret Code is required."}), 400
+    result = verify_ro_origin_code(open_id)
+    return jsonify(result), 200 if result.get("status") == "success" else 400
+
+@app.route('/ro-origin/get-servers', methods=['POST'])
+def handle_ro_origin_get_servers():
+    data = request.get_json()
+    open_id = data.get('open_id')
+    if not open_id: return jsonify({"status": "error", "message": "Secret Code is required."}), 400
+    result = get_ro_origin_servers(open_id)
+    return jsonify(result), 200 if result.get("status") == "success" else 400
+
+@app.route('/ro-origin/get-roles', methods=['POST'])
+def handle_ro_origin_get_roles():
+    data = request.get_json()
+    open_id = data.get('open_id')
+    server_id = data.get('server_id')
+    if not open_id or not server_id: return jsonify({"status": "error", "message": "Secret Code and Server ID are required."}), 400
+    result = get_ro_origin_roles(open_id, server_id)
+    return jsonify(result), 200 if result.get("status") == "success" else 400
 
 @app.route('/sitemap.xml')
 def generate_sitemap():
