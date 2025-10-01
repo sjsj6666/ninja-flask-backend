@@ -265,6 +265,10 @@ def get_ro_origin_roles(open_id, server_id):
 
 
 # --- Flask Routes ---
+@app.route('/')
+def home():
+    return "NinjaTopUp API Backend is Live!"
+
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None}, methods=['GET'])
 @app.route('/check-id/<game_slug>/<uid>/<server_id>', methods=['GET'])
 def check_game_id(game_slug, uid, server_id):
@@ -299,7 +303,7 @@ def check_game_id(game_slug, uid, server_id):
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
-@app.route('/ro-origin/verify-code', methods=['POST'])
+@app.route('/ro-origin/verify-code', methods=['POST', 'OPTIONS'])
 def handle_ro_origin_verify():
     data = request.get_json()
     open_id = data.get('open_id')
@@ -307,7 +311,7 @@ def handle_ro_origin_verify():
     result = verify_ro_origin_code(open_id)
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
-@app.route('/ro-origin/get-servers', methods=['POST'])
+@app.route('/ro-origin/get-servers', methods=['POST', 'OPTIONS'])
 def handle_ro_origin_get_servers():
     data = request.get_json()
     open_id = data.get('open_id')
@@ -315,7 +319,7 @@ def handle_ro_origin_get_servers():
     result = get_ro_origin_servers(open_id)
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
-@app.route('/ro-origin/get-roles', methods=['POST'])
+@app.route('/ro-origin/get-roles', methods=['POST', 'OPTIONS'])
 def handle_ro_origin_get_roles():
     data = request.get_json()
     open_id = data.get('open_id')
