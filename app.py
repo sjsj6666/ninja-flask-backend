@@ -39,37 +39,25 @@ BASE_URL = "https://www.gameuniverse.co"
 # --- API Headers & Constants ---
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    "Origin": "https://www.smile.one",
-    "X-Requested-With": "XMLHttpRequest",
-    "Cookie": os.environ.get("SMILE_ONE_COOKIE")
+    "Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "Origin": "https://www.smile.one", "X-Requested-With": "XMLHttpRequest", "Cookie": os.environ.get("SMILE_ONE_COOKIE")
 }
 BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
-BIGO_NATIVE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/",
-    "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "cross-site"
-}
+BIGO_NATIVE_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/" }
 ENJOYGM_BASE_URL = "https://www.enjoygm.com/portal/supplier/api"
-ENJOYGM_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "*/*", "Referer": "https://www.enjoygm.com/", "X-Requested-With": "XMLHttpRequest"
-}
+ENJOYGM_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Referer": "https://www.enjoygm.com/" }
 RMTGAMESHOP_VALIDATE_URL = "https://rmtgameshop.com/game/checkid"
-RMTGAMESHOP_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://rmtgameshop.com",
-    "Referer": "https://rmtgameshop.com/", "X-Auth-Token": "5a9cbf0b303b57f12e3da444f5d42c59"
-}
+RMTGAMESHOP_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://rmtgameshop.com", "Referer": "https://rmtgameshop.com/", "X-Auth-Token": "5a9cbf0b303b57f12e3da444f5d42c59" }
 SPACEGAMING_VALIDATE_URL = "https://spacegaming.sg/wp-json/endpoint/validate_v2"
-SPACEGAMING_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "*/*",
-    "Content-Type": "application/json",
-    "Origin": "https://spacegaming.sg",
-    "Referer": "https://spacegaming.sg/"
-}
+SPACEGAMING_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://spacegaming.sg", "Referer": "https://spacegaming.sg/" }
+NETEASE_BASE_URL = "https://pay.neteasegames.com/gameclub"
+NETEASE_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Referer": "https://pay.neteasegames.com/"}
+RAZER_BASE_URL = "https://gold.razer.com/api/ext/custom"
+RAZER_HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*"}
+NUVERSE_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
+NUVERSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
+ROM_XD_VALIDATE_URL = "https://xdsdk-intnl-6.xd.com/product/v1/query/game/role"
+ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
 
 
 # --- Helper Functions for ID Validation ---
@@ -101,29 +89,39 @@ def perform_ml_check(user_id, zone_id):
     if fallback_result.get("status") == "success": fallback_result['region'] = 'N/A'
     return fallback_result
 
-def check_smile_one_api(game_code_for_smileone, uid, server_id=None):
-    endpoints = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole"}
-    if game_code_for_smileone not in endpoints: return {"status": "error", "message": f"Game '{game_code_for_smileone}' not configured for SmileOne."}
-    url = endpoints[game_code_for_smileone]
-    current_headers = SMILE_ONE_HEADERS.copy()
-    referer_map = {"mobilelegends": "https://www.smile.one/merchant/mobilelegends", "bloodstrike": "https://www.smile.one/br/merchant/game/bloodstrike"}
-    current_headers["Referer"] = referer_map.get(game_code_for_smileone)
-    default_pids_map = {"mobilelegends": "25", "bloodstrike": "20295"}
-    pid_to_use = default_pids_map.get(game_code_for_smileone)
+def check_smile_one_api(game_code, uid, server_id=None):
+    endpoints = {
+        "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", 
+        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
+        "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"
+    }
+    pids = {"mobilelegends": "25", "bloodstrike": "20295"}
+    if game_code not in endpoints: return {"status": "error", "message": "Game not configured for SmileOne."}
+    url = endpoints[game_code]
+    pid_to_use = pids.get(game_code)
+    if game_code == "loveanddeepspace":
+        server_pid_map = {"81": "18760", "82": "18762", "83": "18762"}
+        pid_to_use = server_pid_map.get(str(server_id))
+    if not pid_to_use: return {"status": "error", "message": "Could not resolve product ID for this server."}
     params = {"pid": pid_to_use, "checkrole": "1"}
-    if game_code_for_smileone == "mobilelegends": params.update({"user_id": uid, "zone_id": server_id})
-    elif game_code_for_smileone == "bloodstrike": params.update({"uid": uid, "sid": "-1"})
-    logging.info(f"Sending SmileOne: Game='{game_code_for_smileone}', URL='{url}', PID='{pid_to_use}', Params={params}")
+    if game_code == "mobilelegends": params.update({"user_id": uid, "zone_id": server_id})
+    elif game_code == "bloodstrike": params.update({"uid": uid, "sid": "-1"})
+    else: params.update({"uid": uid, "sid": server_id})
+    logging.info(f"Sending SmileOne API: Game='{game_code}', Params={params}")
     try:
-        req_url = f"{url}?product=bloodstrike" if game_code_for_smileone == "bloodstrike" else url
-        response = requests.post(req_url, data=params, headers=current_headers, timeout=10, verify=certifi.where())
-        response.raise_for_status()
+        response = requests.post(url, data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
+        if "nickname" in response.text and response.headers.get('content-type', '').startswith('text/html'):
+            try:
+                start_idx = response.text.find('{"nickname":"') + len('{"nickname":"')
+                end_idx = response.text.find('"', start_idx)
+                username = response.text[start_idx:end_idx]
+                return {"status": "success", "username": username}
+            except Exception: pass
         data = response.json()
         if data.get("code") == 200:
             username = data.get("username") or data.get("nickname")
-            if username and isinstance(username, str) and username.strip(): return {"status": "success", "username": username.strip()}
-            return {"status": "error", "message": "Username not found in API response"}
-        error_message = data.get("message", data.get("info", f"API error (Code: {data.get('code')})"))
+            if username: return {"status": "success", "username": username.strip()}
+        error_message = data.get("message", data.get("info", "Invalid ID."))
         if "não existe" in error_message: error_message = "Invalid User ID."
         return {"status": "error", "message": error_message}
     except Exception: return {"status": "error", "message": "API Error (SmileOne)"}
@@ -133,7 +131,6 @@ def check_bigo_native_api(uid):
     logging.info(f"Sending Bigo Native API: URL='{BIGO_NATIVE_VALIDATE_URL}', Params={params}")
     try:
         response = requests.get(BIGO_NATIVE_VALIDATE_URL, params=params, headers=BIGO_NATIVE_HEADERS, timeout=10, verify=certifi.where())
-        response.raise_for_status()
         data = response.json()
         if data.get("result") == 0 and data.get("data", {}).get("nick_name"):
             return {"status": "success", "username": data["data"]["nick_name"].strip()}
@@ -149,7 +146,6 @@ def check_enjoygm_api(game_path, uid, server_id=None):
     logging.info(f"Sending EnjoyGM API: URL='{url}', Params={params}")
     try:
         response = requests.get(url, params=params, headers=headers, timeout=10, verify=certifi.where())
-        response.raise_for_status()
         outer_data = response.json()
         if outer_data.get("code") == 200 and outer_data.get("data"):
             inner_data = json.loads(outer_data["data"])
@@ -161,39 +157,79 @@ def check_enjoygm_api(game_path, uid, server_id=None):
 
 def check_rmtgameshop_api(game_code, uid, server_id=None):
     payload = {"game": game_code, "id": uid}
-    if server_id:
-        payload["server"] = server_id
+    if server_id: payload["server"] = server_id
     logging.info(f"Sending RMTGameShop API: URL='{RMTGAMESHOP_VALIDATE_URL}', Payload={json.dumps(payload)}")
     try:
         response = requests.post(RMTGAMESHOP_VALIDATE_URL, json=payload, headers=RMTGAMESHOP_HEADERS, timeout=10, verify=certifi.where())
-        response.raise_for_status()
         data = response.json()
         if not data.get("error") and data.get("code") == 200:
             nickname = data.get("data", {}).get("nickname")
-            if nickname:
-                return {"status": "success", "username": nickname.strip()}
-            else:
-                return {"status": "error", "message": "Player found, but name is unavailable."}
+            if nickname: return {"status": "success", "username": nickname.strip()}
         return {"status": "error", "message": data.get("message", "Invalid Player ID.")}
-    except Exception as e:
-        logging.error(f"RMTGameShop API error for {game_code}: {e}")
-        return {"status": "error", "message": f"API Error ({game_code})"}
+    except Exception as e: return {"status": "error", "message": f"API Error ({game_code})"}
 
 def check_spacegaming_api(game_id_for_api, uid):
     payload = {"username": uid, "game_id": game_id_for_api}
     logging.info(f"Sending SpaceGaming API: URL='{SPACEGAMING_VALIDATE_URL}', Payload={json.dumps(payload)}")
     try:
         response = requests.post(SPACEGAMING_VALIDATE_URL, json=payload, headers=SPACEGAMING_HEADERS, timeout=10, verify=certifi.where())
-        response.raise_for_status()
         data = response.json()
         if data.get("status") == "true" and data.get("message"):
-            username = data["message"]
-            return {"status": "success", "username": username.strip()}
-        else:
-            return {"status": "error", "message": "Invalid Player ID."}
-    except Exception as e:
-        logging.error(f"SpaceGaming API error for {game_id_for_api}: {e}")
-        return {"status": "error", "message": f"API Error ({game_id_for_api})"}
+            return {"status": "success", "username": data["message"].strip()}
+        return {"status": "error", "message": "Invalid Player ID."}
+    except Exception as e: return {"status": "error", "message": f"API Error ({game_id_for_api})"}
+
+def check_netease_api(game_path, server_id, role_id):
+    url = f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role"
+    params = {"roleid": role_id, "timestamp": int(time.time() * 1000)}
+    logging.info(f"Sending Netease API: URL='{url}', Params={params}")
+    try:
+        response = requests.get(url, params=params, headers=NETEASE_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == "0000":
+            username = data.get("data", {}).get("rolename")
+            if username: return {"status": "success", "username": username.strip()}
+        return {"status": "error", "message": "Invalid ID or Server."}
+    except Exception: return {"status": "error", "message": "API Error (Netease)"}
+
+def check_razer_api(game_path, uid, server_id):
+    url = f"{RAZER_BASE_URL}/{game_path}/users/{uid}"
+    params = {"serverId": server_id}
+    logging.info(f"Sending Razer API: URL='{url}', Params={params}")
+    try:
+        response = requests.get(url, params=params, headers=RAZER_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if response.status_code == 200 and data.get("username"):
+            return {"status": "success", "username": data["username"].strip()}
+        return {"status": "error", "message": data.get("message", "Invalid ID or Server.")}
+    except Exception: return {"status": "error", "message": "API Error (Razer)"}
+
+def check_nuverse_api(aid, role_id):
+    params = {"tab": "purchase", "aid": aid, "role_id": role_id}
+    logging.info(f"Sending Nuverse API: URL='{NUVERSE_VALIDATE_URL}', Params={params}")
+    try:
+        response = requests.get(NUVERSE_VALIDATE_URL, params=params, headers=NUVERSE_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 0 and data.get("message", "").lower() == "success":
+            role_info = data.get("data", [{}])[0]
+            username = role_info.get("role_name")
+            server_name = role_info.get("server_name")
+            if username and server_name:
+                return {"status": "success", "username": f"{username} ({server_name})"}
+        return {"status": "error", "message": "Invalid Player ID."}
+    except Exception: return {"status": "error", "message": "API Error (Nuverse)"}
+
+def check_rom_xd_api(role_id):
+    params = {"source": "webpay", "pt": "macOS", "appId": "2079001", "serverId": "50001", "roleId": role_id}
+    logging.info(f"Sending ROM XD API: URL='{ROM_XD_VALIDATE_URL}', Params={params}")
+    try:
+        response = requests.get(ROM_XD_VALIDATE_URL, params=params, headers=ROM_XD_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 200:
+            username = data.get("data", {}).get("name")
+            if username: return {"status": "success", "username": username.strip()}
+        return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
+    except Exception as e: return {"status": "error", "message": "API Error (ROM)"}
 
 
 # --- Flask Routes ---
@@ -205,28 +241,27 @@ def home(): return "NinjaTopUp API Backend is Live!"
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
     
-    enjoygm_map = {
-        "pubg-mobile": "pubg", "genshin-impact": "genshin-impact",
-        "honkai-star-rail": "honkai", "zenless-zone-zero": "zenless-zone-zero"
+    handlers = {
+        "pubg-mobile": lambda: check_enjoygm_api("pubg", uid),
+        "genshin-impact": lambda: check_enjoygm_api("genshin-impact", uid, server_id),
+        "honkai-star-rail": lambda: check_enjoygm_api("honkai", uid, server_id),
+        "zenless-zone-zero": lambda: check_enjoygm_api("zenless-zone-zero", uid, server_id),
+        "arena-breakout": lambda: check_spacegaming_api("arena_breakout", uid),
+        "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
+        "love-and-deepspace": lambda: check_smile_one_api("loveanddeepspace", uid, server_id),
+        "ragnarok-m-classic": lambda: check_rom_xd_api(uid),
+        "honor-of-kings": lambda: check_rmtgameshop_api("HOK", uid),
+        "magic-chess-go-go": lambda: check_rmtgameshop_api("MCGG", uid, server_id),
+        "bigo-live": lambda: check_bigo_native_api(uid),
+        "mobile-legends": lambda: perform_ml_check(uid, server_id),
+        "mobile-legends-sg": lambda: perform_ml_check(uid, server_id),
+        "identity-v": lambda: check_netease_api("identityv", {"Asia": "2001", "NA-EU": "2011"}.get(server_id), uid),
+        "marvel-rivals": lambda: check_netease_api("marvelrivals", "11001", uid),
+        "ragnarok-x-next-generation": lambda: check_nuverse_api("3402", uid),
+        "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, server_id)
     }
-    smileone_map = {"bloodstrike": "bloodstrike"}
-    rmtgameshop_map = {"honor-of-kings": "HOK", "magic-chess-go-go": "MCGG"}
-    spacegaming_map = {"arena-breakout": "arena_breakout"}
     
-    handler = None
-    if game_slug in enjoygm_map:
-        handler = lambda: check_enjoygm_api(enjoygm_map[game_slug], uid, server_id)
-    elif game_slug in spacegaming_map:
-        handler = lambda: check_spacegaming_api(spacegaming_map[game_slug], uid)
-    elif game_slug in smileone_map:
-        handler = lambda: check_smile_one_api(smileone_map[game_slug], uid)
-    elif game_slug in rmtgameshop_map:
-        handler = lambda: check_rmtgameshop_api(rmtgameshop_map[game_slug], uid, server_id)
-    elif game_slug == "bigo-live":
-        handler = lambda: check_bigo_native_api(uid)
-    elif "mobile-legends" in game_slug:
-        handler = lambda: perform_ml_check(uid, server_id)
-        
+    handler = handlers.get(game_slug)
     if handler:
         result = handler()
     else:
