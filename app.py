@@ -64,15 +64,11 @@ ENJOYGM_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "*/*", "Referer": "https://www.enjoygm.com/", "X-Requested-With": "XMLHttpRequest"
 }
-# NEW: Honor of Kings API from rmtgameshop.com
-HOK_VALIDATE_URL = "https://rmtgameshop.com/game/checkid"
-HOK_HEADERS = {
+RMTGAMESHOP_VALIDATE_URL = "https://rmtgameshop.com/game/checkid"
+RMTGAMESHOP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "*/*",
-    "Content-Type": "application/json",
-    "Origin": "https://rmtgameshop.com",
-    "Referer": "https://rmtgameshop.com/",
-    "X-Auth-Token": "5a9cbf0b303b57f12e3da444f5d42c59" # Static token from log
+    "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://rmtgameshop.com",
+    "Referer": "https://rmtgameshop.com/", "X-Auth-Token": "5a9cbf0b303b57f12e3da444f5d42c59"
 }
 
 
@@ -176,11 +172,13 @@ def check_enjoygm_api(game_path, uid, server_id=None):
         return {"status": "error", "message": "Invalid ID or Server."}
     except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
 
-def check_rmtgameshop_hok_api(uid):
-    payload = {"game": "HOK", "id": uid}
-    logging.info(f"Sending RMTGameShop HOK API: URL='{HOK_VALIDATE_URL}', Payload={json.dumps(payload)}")
+def check_rmtgameshop_api(game_code, uid, server_id=None):
+    payload = {"game": game_code, "id": uid}
+    if server_id:
+        payload["server"] = server_id
+    logging.info(f"Sending RMTGameShop API: URL='{RMTGAMESHOP_VALIDATE_URL}', Payload={json.dumps(payload)}")
     try:
-        response = requests.post(HOK_VALIDATE_URL, json=payload, headers=HOK_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.post(RMTGAMESHOP_VALIDATE_URL, json=payload, headers=RMTGAMESHOP_HEADERS, timeout=10, verify=certifi.where())
         response.raise_for_status()
         data = response.json()
         if not data.get("error") and data.get("code") == 200:
@@ -191,8 +189,8 @@ def check_rmtgameshop_hok_api(uid):
                 return {"status": "error", "message": "Player found, but name is unavailable."}
         return {"status": "error", "message": data.get("message", "Invalid Player ID.")}
     except Exception as e:
-        logging.error(f"RMTGameShop HOK API error: {e}")
-        return {"status": "error", "message": "API Error (HOK)"}
+        logging.error(f"RMTGameShop API error for {game_code}: {e}")
+        return {"status": "error", "message": f"API Error ({game_code})"}
 
 
 # --- Flask Routes ---
@@ -210,6 +208,7 @@ def check_game_id(game_slug, uid, server_id):
     }
     elitedias_map = {"metal-slug-awakening": "metal_slug", "arena-breakout": "arena_breakout"}
     smileone_map = {"bloodstrike": "bloodstrike"}
+    rmtgameshop_map = {"honor-of-kings": "HOK", "magic-chess-go-go": "MCGG"}
     
     handler = None
     if game_slug in enjoygm_map:
@@ -218,10 +217,10 @@ def check_game_id(game_slug, uid, server_id):
         handler = lambda: check_elitedias_api(elitedias_map[game_slug], uid)
     elif game_slug in smileone_map:
         handler = lambda: check_smile_one_api(smileone_map[game_slug], uid)
+    elif game_slug in rmtgameshop_map:
+        handler = lambda: check_rmtgameshop_api(rmtgameshop_map[game_slug], uid, server_id)
     elif game_slug == "bigo-live":
         handler = lambda: check_bigo_native_api(uid)
-    elif game_slug == "honor-of-kings":
-        handler = lambda: check_rmtgameshop_hok_api(uid)
     elif "mobile-legends" in game_slug:
         handler = lambda: perform_ml_check(uid, server_id)
         
@@ -232,6 +231,8 @@ def check_game_id(game_slug, uid, server_id):
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
+
+# Other routes like /sitemap.xml, /create-paynow-qr, etc. remain the same...
 
 @app.route('/sitemap.xml')
 def generate_sitemap():
