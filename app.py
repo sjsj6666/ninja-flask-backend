@@ -35,7 +35,7 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 # --- Your Website's Domain ---
-BASE_URL = "https://www.gameuniverse.co" 
+BASE_URL = "https://www.gameuniverse.co"
 
 # --- API Headers & Constants ---
 SMILE_ONE_HEADERS = {
