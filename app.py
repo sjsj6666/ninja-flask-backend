@@ -45,14 +45,6 @@ SMILE_ONE_HEADERS = {
     "X-Requested-With": "XMLHttpRequest",
     "Cookie": os.environ.get("SMILE_ONE_COOKIE")
 }
-ELITEDIAS_CHECKID_URL = "https://api.elitedias.com/checkid"
-ELITEDIAS_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "application/json, text/javascript, */*; q=0.01", "Accept-Language": "en-SG,en;q=0.9",
-    "Content-Type": "application/json; charset=utf-8", "Origin": "https://elitedias.com",
-    "Referer": "https://elitedias.com/", "X-Requested-With": "XMLHttpRequest",
-    "Sec-Fetch-Dest": "empty", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Site": "same-site"
-}
 BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
 BIGO_NATIVE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
@@ -69,6 +61,14 @@ RMTGAMESHOP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://rmtgameshop.com",
     "Referer": "https://rmtgameshop.com/", "X-Auth-Token": "5a9cbf0b303b57f12e3da444f5d42c59"
+}
+SPACEGAMING_VALIDATE_URL = "https://spacegaming.sg/wp-json/endpoint/validate_v2"
+SPACEGAMING_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+    "Accept": "*/*",
+    "Content-Type": "application/json",
+    "Origin": "https://spacegaming.sg",
+    "Referer": "https://spacegaming.sg/"
 }
 
 
@@ -128,19 +128,6 @@ def check_smile_one_api(game_code_for_smileone, uid, server_id=None):
         return {"status": "error", "message": error_message}
     except Exception: return {"status": "error", "message": "API Error (SmileOne)"}
 
-def check_elitedias_api(game_code_for_api, role_id):
-    payload = {"game": game_code_for_api, "userid": str(role_id)}
-    logging.info(f"Sending EliteDias API: URL='{ELITEDIAS_CHECKID_URL}', Payload='{json.dumps(payload)}'")
-    try:
-        response = requests.post(ELITEDIAS_CHECKID_URL, json=payload, headers=ELITEDIAS_HEADERS, timeout=12, verify=certifi.where())
-        data = response.json()
-        if response.status_code == 200 and data.get("valid") == "valid":
-            username = data.get("name") or data.get("username")
-            if username and username.lower() != 'na': return {"status": "success", "username": username.strip()}
-            return {"status": "success", "message": "Role ID Verified."}
-        return {"status": "error", "message": data.get("message", "Invalid Role ID.")}
-    except Exception: return {"status": "error", "message": "API Error (EliteDias)"}
-
 def check_bigo_native_api(uid):
     params = {"isFromApp": "0", "bigoId": uid}
     logging.info(f"Sending Bigo Native API: URL='{BIGO_NATIVE_VALIDATE_URL}', Params={params}")
@@ -192,6 +179,22 @@ def check_rmtgameshop_api(game_code, uid, server_id=None):
         logging.error(f"RMTGameShop API error for {game_code}: {e}")
         return {"status": "error", "message": f"API Error ({game_code})"}
 
+def check_spacegaming_api(game_id_for_api, uid):
+    payload = {"username": uid, "game_id": game_id_for_api}
+    logging.info(f"Sending SpaceGaming API: URL='{SPACEGAMING_VALIDATE_URL}', Payload={json.dumps(payload)}")
+    try:
+        response = requests.post(SPACEGAMING_VALIDATE_URL, json=payload, headers=SPACEGAMING_HEADERS, timeout=10, verify=certifi.where())
+        response.raise_for_status()
+        data = response.json()
+        if data.get("status") == "true" and data.get("message"):
+            username = data["message"]
+            return {"status": "success", "username": username.strip()}
+        else:
+            return {"status": "error", "message": "Invalid Player ID."}
+    except Exception as e:
+        logging.error(f"SpaceGaming API error for {game_id_for_api}: {e}")
+        return {"status": "error", "message": f"API Error ({game_id_for_api})"}
+
 
 # --- Flask Routes ---
 @app.route('/')
@@ -206,15 +209,15 @@ def check_game_id(game_slug, uid, server_id):
         "pubg-mobile": "pubg", "genshin-impact": "genshin-impact",
         "honkai-star-rail": "honkai", "zenless-zone-zero": "zenless-zone-zero"
     }
-    elitedias_map = {"metal-slug-awakening": "metal_slug", "arena-breakout": "arena_breakout"}
     smileone_map = {"bloodstrike": "bloodstrike"}
     rmtgameshop_map = {"honor-of-kings": "HOK", "magic-chess-go-go": "MCGG"}
+    spacegaming_map = {"arena-breakout": "arena_breakout"}
     
     handler = None
     if game_slug in enjoygm_map:
         handler = lambda: check_enjoygm_api(enjoygm_map[game_slug], uid, server_id)
-    elif game_slug in elitedias_map:
-        handler = lambda: check_elitedias_api(elitedias_map[game_slug], uid)
+    elif game_slug in spacegaming_map:
+        handler = lambda: check_spacegaming_api(spacegaming_map[game_slug], uid)
     elif game_slug in smileone_map:
         handler = lambda: check_smile_one_api(smileone_map[game_slug], uid)
     elif game_slug in rmtgameshop_map:
@@ -231,8 +234,6 @@ def check_game_id(game_slug, uid, server_id):
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
-
-# Other routes like /sitemap.xml, /create-paynow-qr, etc. remain the same...
 
 @app.route('/sitemap.xml')
 def generate_sitemap():
