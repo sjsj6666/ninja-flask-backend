@@ -232,26 +232,6 @@ def check_rom_xd_api(role_id):
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
-def verify_ro_origin_oneone_code(uid):
-    url = f"{RO_ORIGIN_ONEONE_BASE_URL}/getServers"
-    payload = {} 
-    logging.info(f"Verifying RO Origin Code (oneone): Code='{uid}'")
-    try:
-        headers = RO_ORIGIN_ONEONE_HEADERS.copy()
-        headers['userId'] = uid
-        response = requests.post(url, json=payload, headers=headers, timeout=10, verify=certifi.where())
-        if response.status_code == 200:
-            data = response.json()
-            if isinstance(data, list) and len(data) > 0:
-                return {"status": "success", "message": "Secret Code is valid."}
-            else:
-                return {"status": "error", "message": "Invalid Secret Code."}
-        else:
-            return {"status": "error", "message": "Invalid Secret Code."}
-    except Exception as e:
-        logging.error(f"RO Origin Code Verification Error: {e}")
-        return {"status": "error", "message": "API Error during verification"}
-
 def get_ro_origin_oneone_servers():
     url = f"{RO_ORIGIN_ONEONE_BASE_URL}/getServers"
     logging.info(f"Sending RO Origin Get Servers API (oneone): URL='{url}'")
@@ -317,18 +297,6 @@ def check_game_id(game_slug, uid, server_id):
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
-
-@app.route('/ro-origin/verify-code', methods=['POST', 'OPTIONS'])
-@cross_origin(origins=allowed_origins, supports_credentials=True)
-def handle_ro_origin_verify_code():
-    if request.method == 'OPTIONS':
-        return Response(status=200)
-    data = request.get_json()
-    uid = data.get('open_id')
-    if not uid:
-        return jsonify({"status": "error", "message": "Secret Code is required."}), 400
-    result = verify_ro_origin_oneone_code(uid)
-    return jsonify(result), 200 if result.get("status") == "success" else 400
 
 @app.route('/ro-origin/get-servers', methods=['POST', 'OPTIONS'])
 @cross_origin(origins=allowed_origins, supports_credentials=True)
