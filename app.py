@@ -232,17 +232,22 @@ def check_rom_xd_api(role_id):
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
+# *** MODIFIED FUNCTION: NOW RETURNS A STATIC LIST ***
 def get_ro_origin_oneone_servers():
-    url = f"{RO_ORIGIN_ONEONE_BASE_URL}/getServers"
-    logging.info(f"Sending RO Origin Get Servers API (oneone): URL='{url}'")
-    try:
-        response = requests.post(url, headers=RO_ORIGIN_ONEONE_HEADERS, timeout=10, verify=certifi.where())
-        data = response.json()
-        if isinstance(data, list):
-            return {"status": "success", "servers": data}
-        return {"status": "error", "message": "Could not fetch servers."}
-    except Exception as e:
-        return {"status": "error", "message": "API Error"}
+    logging.info("Returning hardcoded RO Origin server list.")
+    servers_list = [
+        {"server_id": 1, "server_name": "Prontera-(1~3)/Izlude-9(-10)/Morroc-(1~10)"},
+        {"server_id": 4, "server_name": "Prontera-(4~6)/Prontera-10/Izlude-(1~8)"},
+        {"server_id": 7, "server_name": "Prontera-(7~9)/Geffen-(1~10)/Payon-(1~10)"},
+        {"server_id": 51, "server_name": "Poring Island-(1~10)/Orc Village-(1~10)/Shipwreck-(1~9)/Memoria/Awakening/Ant Hell-(1~10)/Goblin Forest-1(-2-4)/Valentine"},
+        {"server_id": 95, "server_name": "Lasagna/1st-Anniversary/Goblin Forest-7/For Honor/Sakura Vows/Goblin Forest-10/Garden-1"},
+        {"server_id": 102, "server_name": "1.5th Anniversary/Vicland"},
+        {"server_id": 104, "server_name": "2025"},
+        {"server_id": 105, "server_name": "Timeless Love"},
+        {"server_id": 106, "server_name": "2nd Anniversary"},
+        {"server_id": 107, "server_name": "Hugel"}
+    ]
+    return {"status": "success", "servers": servers_list}
 
 def get_ro_origin_oneone_roles(uid, server_id):
     url = f"{RO_ORIGIN_ONEONE_BASE_URL}/getRoles"
