@@ -86,17 +86,13 @@ def perform_ml_check(user_id, zone_id):
     return fallback_result
 
 def check_smile_one_api(game_code, uid, server_id=None):
-    endpoints = {
-        "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", 
-        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
-        "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"
-    }
+    endpoints = { "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"}
     pids = {"mobilelegends": "25", "bloodstrike": "20295"}
     if game_code not in endpoints: return {"status": "error", "message": f"Game not configured: {game_code}"}
     
     pid_to_use = pids.get(game_code)
     if game_code == "loveanddeepspace":
-        server_pid_map = {"Asia": "18762", "America": "18760", "Europe": "18762"}
+        server_pid_map = {"America": "18760", "Asia": "18762", "Europe": "18762"} # Based on smile.one's server names
         pid_to_use = server_pid_map.get(str(server_id))
     if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
         
@@ -193,9 +189,12 @@ def check_razer_api(game_path, uid, server_id):
     try:
         response = requests.get(f"{RAZER_BASE_URL}/{game_path}/users/{uid}", params=params, headers=RAZER_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
+        # THE FIX IS HERE: Check status code first
         if response.status_code == 200 and data.get("username"):
             return {"status": "success", "username": data["username"].strip()}
-        return {"status": "error", "message": data.get("message", "Invalid ID or Server.")}
+        else:
+            # Pass the specific error message from the API
+            return {"status": "error", "message": data.get("message", "Invalid ID or Server.")}
     except Exception: return {"status": "error", "message": "API Error (Razer)"}
 
 def check_nuverse_api(aid, role_id):
