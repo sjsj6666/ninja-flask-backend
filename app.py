@@ -356,6 +356,12 @@ def handle_ro_origin_get_roles():
     result = check_ro_origin_razer_api(uid, server_id)
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
+# --- ADD THIS NEW ROUTE ---
+@app.route('/health')
+def health_check():
+    """A simple endpoint for uptime monitoring to keep the service alive."""
+    return jsonify({"status": "healthy"}), 200
+
 @app.route('/sitemap.xml')
 def generate_sitemap():
     try:
