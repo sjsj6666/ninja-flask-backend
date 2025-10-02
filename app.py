@@ -59,13 +59,21 @@ NUVERSE_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
 NUVERSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
 ROM_XD_VALIDATE_URL = "https://xdsdk-intnl-6.xd.com/product/v1/query/game/role"
 ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
-
-# --- NEW: Razer Gold RO Origin Constants ---
 RAZER_RO_ORIGIN_VALIDATE_URL = "https://gold.razer.com/api/ext/custom/gravity-ragnarok-origin/users"
 RAZER_RO_ORIGIN_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin"
+}
+# NEW HOK CONSTANTS
+GAMINGNP_HOK_VALIDATE_URL = "https://gaming.com.np/ajaxCheckId"
+GAMINGNP_HOK_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+    "Accept": "*/*",
+    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    "Origin": "https://gaming.com.np",
+    "Referer": "https://gaming.com.np/topup/honor-of-kings",
+    "X-Requested-With": "XMLHttpRequest"
 }
 
 
@@ -95,38 +103,68 @@ def perform_ml_check(user_id, zone_id):
     return fallback_result
 
 def check_smile_one_api(game_code, uid, server_id=None):
-    endpoints = { "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole", "loveanddeepspace": "https://www.smile.one/us/merchant/loveanddeepspace/checkrole/"}
-    pids = {"mobilelegends": "25", "bloodstrike": "20295"}
+    endpoints = {
+        "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole",
+        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
+        "loveanddeepspace": "https://www.smile.one/merchant/loveanddeepspace/checkrole/"
+    }
+    # CORRECTED PID FOR BLOODSTRIKE
+    pids = {"mobilelegends": "25", "bloodstrike": "20294"} 
+
     if game_code not in endpoints: return {"status": "error", "message": f"Game not configured: {game_code}"}
     
     pid_to_use = pids.get(game_code)
+    sid_to_use = server_id
+
     if game_code == "loveanddeepspace":
-        server_pid_map = {"America": "18760", "Asia": "18762", "Europe": "18762"}
-        pid_to_use = server_pid_map.get(str(server_id))
+        # Using a constant PID for loveanddeepspace
+        pid_to_use = "18762"
+        # CORRECTED SID MAPPING FOR LOVE AND DEEPSPACE
+        server_sid_map = {"Asia": "81", "America": "82", "Europe": "83"}
+        sid_to_use = server_sid_map.get(str(server_id))
+    
     if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
         
     params = {"pid": pid_to_use, "checkrole": "1"}
-    if game_code == "mobilelegends": params.update({"user_id": uid, "zone_id": server_id})
-    elif game_code == "bloodstrike": params.update({"uid": uid, "sid": "-1"})
-    else: params.update({"uid": uid, "sid": server_id})
+
+    if game_code == "mobilelegends":
+        params.update({"user_id": uid, "zone_id": server_id})
+    elif game_code == "bloodstrike":
+        params.update({"uid": uid, "sid": "-1"}) # Bloodstrike uses a static sid of -1
+    else:
+        params.update({"uid": uid, "sid": sid_to_use})
     
     logging.info(f"Sending SmileOne API: Game='{game_code}', Params={params}")
     try:
         response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
+        
+        # Sometimes the response is HTML with JSON embedded, we try to parse it
         if "nickname" in response.text and "text/html" in response.headers.get('content-type', ''):
             try:
-                start_idx = response.text.find('{"nickname":"') + len('{"nickname":"')
-                end_idx = response.text.find('"', start_idx)
-                return {"status": "success", "username": response.text[start_idx:end_idx]}
-            except Exception: pass
-        data = response.json()
+                # Manually extract JSON from the HTML string
+                json_text = response.text
+                start = json_text.find('{')
+                end = json_text.rfind('}') + 1
+                if start != -1 and end != -1:
+                    data = json.loads(json_text[start:end])
+                else: 
+                    raise ValueError("No JSON object found")
+            except (json.JSONDecodeError, ValueError) as e:
+                logging.error(f"Failed to parse JSON from HTML for SmileOne: {e}")
+                return {"status": "error", "message": "API response format error."}
+        else:
+            data = response.json()
+
         if data.get("code") == 200:
             username = data.get("username") or data.get("nickname")
             if username: return {"status": "success", "username": username.strip()}
+        
         error_message = data.get("message", data.get("info", "Invalid ID."))
         if "não existe" in error_message: error_message = "Invalid User ID."
         return {"status": "error", "message": error_message}
-    except Exception: return {"status": "error", "message": "API Error (SmileOne)"}
+    except Exception as e:
+        logging.error(f"SmileOne API exception: {e}")
+        return {"status": "error", "message": "API Error (SmileOne)"}
 
 def check_bigo_native_api(uid):
     params = {"isFromApp": "0", "bigoId": uid}
@@ -154,18 +192,25 @@ def check_enjoygm_api(game_path, uid, server_id=None):
         return {"status": "error", "message": "Invalid ID or Server."}
     except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
 
-def check_rmtgameshop_api(game_code, uid, server_id=None):
-    payload = {"game": game_code, "id": uid}
-    if server_id: payload["server"] = server_id
-    logging.info(f"Sending RMTGameShop API: Payload={json.dumps(payload)}")
+# NEW FUNCTION FOR HOK
+def check_gamingnp_api(uid):
+    payload = {
+        "userid": uid,
+        "game": "hok",
+        "categoryId": "3898" # This seems to be a static value for HOK on this site
+    }
+    logging.info(f"Sending Gaming.com.np API: Payload={payload}")
     try:
-        response = requests.post(RMTGAMESHOP_VALIDATE_URL, json=payload, headers=RMTGAMESHOP_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.post(GAMINGNP_HOK_VALIDATE_URL, data=payload, headers=GAMINGNP_HOK_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
-        if not data.get("error") and data.get("code") == 200:
-            nickname = data.get("data", {}).get("nickname")
-            if nickname: return {"status": "success", "username": nickname.strip()}
-        return {"status": "error", "message": data.get("message", "Invalid Player ID.")}
-    except Exception: return {"status": "error", "message": f"API Error ({game_code})"}
+        if data.get("success") and data.get("detail", {}).get("valid") == "valid":
+            username = data["detail"].get("name")
+            if username:
+                return {"status": "success", "username": username.strip()}
+        return {"status": "error", "message": "Invalid Player ID."}
+    except Exception as e:
+        logging.error(f"Gaming.com.np API Error: {e}")
+        return {"status": "error", "message": "API Error (HOK)"}
 
 def check_spacegaming_api(game_id, uid):
     payload = {"username": uid, "game_id": game_id}
@@ -248,7 +293,6 @@ def get_ro_origin_servers():
     ]
     return {"status": "success", "servers": servers_list}
 
-# --- NEW: Razer Gold RO Origin Function ---
 def check_ro_origin_razer_api(uid, server_id):
     url = f"{RAZER_RO_ORIGIN_VALIDATE_URL}/{uid}"
     params = {"serverId": server_id}
@@ -291,7 +335,7 @@ def check_game_id(game_slug, uid, server_id):
         "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
         "love-and-deepspace": lambda: check_smile_one_api("loveanddeepspace", uid, server_id),
         "ragnarok-m-classic": lambda: check_rom_xd_api(uid),
-        "honor-of-kings": lambda: check_rmtgameshop_api("HOK", uid),
+        "honor-of-kings": lambda: check_gamingnp_api(uid), # UPDATED HOK HANDLER
         "magic-chess-go-go": lambda: check_rmtgameshop_api("MCGG", uid, server_id),
         "bigo-live": lambda: check_bigo_native_api(uid),
         "mobile-legends": lambda: perform_ml_check(uid, server_id),
@@ -325,7 +369,6 @@ def handle_ro_origin_get_roles():
     server_id = data.get('serverId')
     if not uid or not server_id:
         return jsonify({"status": "error", "message": "Secret Code and Server ID are required."}), 400
-    # --- UPDATED TO USE RAZER API ---
     result = check_ro_origin_razer_api(uid, server_id)
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
