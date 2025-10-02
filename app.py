@@ -47,8 +47,6 @@ BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/ge
 BIGO_NATIVE_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/" }
 ENJOYGM_BASE_URL = "https://www.enjoygm.com/portal/supplier/api"
 ENJOYGM_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Referer": "https://www.enjoygm.com/" }
-RMTGAMESHOP_VALIDATE_URL = "https://rmtgameshop.com/game/checkid"
-RMTGAMESHOP_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://rmtgameshop.com", "Referer": "https://rmtgameshop.com/", "X-Auth-Token": "5a9cbf0b303b57f12e3da444f5d42c59" }
 SPACEGAMING_VALIDATE_URL = "https://spacegaming.sg/wp-json/endpoint/validate_v2"
 SPACEGAMING_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://spacegaming.sg", "Referer": "https://spacegaming.sg/" }
 NETEASE_BASE_URL = "https://pay.neteasegames.com/gameclub"
@@ -65,7 +63,6 @@ RAZER_RO_ORIGIN_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin"
 }
-# NEW HOK CONSTANTS
 GAMINGNP_HOK_VALIDATE_URL = "https://gaming.com.np/ajaxCheckId"
 GAMINGNP_HOK_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
@@ -102,55 +99,52 @@ def perform_ml_check(user_id, zone_id):
     if fallback_result.get("status") == "success": fallback_result['region'] = 'N/A'
     return fallback_result
 
+# UPDATED to handle Bloodstrike, Love and Deepspace, and Magic Chess Go Go
 def check_smile_one_api(game_code, uid, server_id=None):
     endpoints = {
         "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole",
-        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole",
-        "loveanddeepspace": "https://www.smile.one/merchant/loveanddeepspace/checkrole/"
+        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole?product=bloodstrike",
+        "loveanddeepspace": "https://www.smile.one/merchant/loveanddeepspace/checkrole/",
+        "magicchessgogo": "https://www.smile.one/br/merchant/game/checkrole?product=magicchessgogo"
     }
-    # CORRECTED PID FOR BLOODSTRIKE
-    pids = {"mobilelegends": "25", "bloodstrike": "20294"} 
+    pids = {"mobilelegends": "25", "bloodstrike": "20294"}
 
     if game_code not in endpoints: return {"status": "error", "message": f"Game not configured: {game_code}"}
     
     pid_to_use = pids.get(game_code)
     sid_to_use = server_id
+    params = {"checkrole": "1"}
 
     if game_code == "loveanddeepspace":
-        # Using a constant PID for loveanddeepspace
         pid_to_use = "18762"
-        # CORRECTED SID MAPPING FOR LOVE AND DEEPSPACE
         server_sid_map = {"Asia": "81", "America": "82", "Europe": "83"}
         sid_to_use = server_sid_map.get(str(server_id))
-    
-    if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
-        
-    params = {"pid": pid_to_use, "checkrole": "1"}
-
-    if game_code == "mobilelegends":
-        params.update({"user_id": uid, "zone_id": server_id})
+        if not sid_to_use: return {"status": "error", "message": "Invalid server for this game."}
+        params.update({"uid": uid, "pid": pid_to_use, "sid": sid_to_use})
+    elif game_code == "mobilelegends":
+        if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
+        params.update({"user_id": uid, "zone_id": server_id, "pid": pid_to_use})
     elif game_code == "bloodstrike":
-        params.update({"uid": uid, "sid": "-1"}) # Bloodstrike uses a static sid of -1
+        if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
+        params.update({"uid": uid, "sid": "-1", "pid": pid_to_use})
+    elif game_code == "magicchessgogo":
+        params.update({"uid": uid, "sid": server_id}) # No PID needed for MCGG
     else:
-        params.update({"uid": uid, "sid": sid_to_use})
+        params.update({"uid": uid, "sid": sid_to_use, "pid": pid_to_use})
     
-    logging.info(f"Sending SmileOne API: Game='{game_code}', Params={params}")
+    logging.info(f"Sending SmileOne API: Game='{game_code}', URL='{endpoints[game_code]}', Params={params}")
     try:
         response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
         
-        # Sometimes the response is HTML with JSON embedded, we try to parse it
-        if "nickname" in response.text and "text/html" in response.headers.get('content-type', ''):
+        data = {}
+        if "text/html" in response.headers.get('content-type', ''):
             try:
-                # Manually extract JSON from the HTML string
                 json_text = response.text
                 start = json_text.find('{')
                 end = json_text.rfind('}') + 1
-                if start != -1 and end != -1:
-                    data = json.loads(json_text[start:end])
-                else: 
-                    raise ValueError("No JSON object found")
-            except (json.JSONDecodeError, ValueError) as e:
-                logging.error(f"Failed to parse JSON from HTML for SmileOne: {e}")
+                if start != -1 and end != -1: data = json.loads(json_text[start:end])
+                else: raise ValueError("No JSON object found in HTML response")
+            except (json.JSONDecodeError, ValueError):
                 return {"status": "error", "message": "API response format error."}
         else:
             data = response.json()
@@ -160,11 +154,12 @@ def check_smile_one_api(game_code, uid, server_id=None):
             if username: return {"status": "success", "username": username.strip()}
         
         error_message = data.get("message", data.get("info", "Invalid ID."))
-        if "não existe" in error_message: error_message = "Invalid User ID."
+        if "não existe" in str(error_message): error_message = "Invalid User ID."
         return {"status": "error", "message": error_message}
     except Exception as e:
-        logging.error(f"SmileOne API exception: {e}")
-        return {"status": "error", "message": "API Error (SmileOne)"}
+        logging.error(f"SmileOne API exception for {game_code}: {e}")
+        return {"status": "error", "message": f"API Error ({game_code})"}
+
 
 def check_bigo_native_api(uid):
     params = {"isFromApp": "0", "bigoId": uid}
@@ -192,21 +187,15 @@ def check_enjoygm_api(game_path, uid, server_id=None):
         return {"status": "error", "message": "Invalid ID or Server."}
     except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
 
-# NEW FUNCTION FOR HOK
 def check_gamingnp_api(uid):
-    payload = {
-        "userid": uid,
-        "game": "hok",
-        "categoryId": "3898" # This seems to be a static value for HOK on this site
-    }
+    payload = {"userid": uid, "game": "hok", "categoryId": "3898"}
     logging.info(f"Sending Gaming.com.np API: Payload={payload}")
     try:
         response = requests.post(GAMINGNP_HOK_VALIDATE_URL, data=payload, headers=GAMINGNP_HOK_HEADERS, timeout=10, verify=certifi.where())
         data = response.json()
         if data.get("success") and data.get("detail", {}).get("valid") == "valid":
             username = data["detail"].get("name")
-            if username:
-                return {"status": "success", "username": username.strip()}
+            if username: return {"status": "success", "username": username.strip()}
         return {"status": "error", "message": "Invalid Player ID."}
     except Exception as e:
         logging.error(f"Gaming.com.np API Error: {e}")
@@ -335,8 +324,8 @@ def check_game_id(game_slug, uid, server_id):
         "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
         "love-and-deepspace": lambda: check_smile_one_api("loveanddeepspace", uid, server_id),
         "ragnarok-m-classic": lambda: check_rom_xd_api(uid),
-        "honor-of-kings": lambda: check_gamingnp_api(uid), # UPDATED HOK HANDLER
-        "magic-chess-go-go": lambda: check_rmtgameshop_api("MCGG", uid, server_id),
+        "honor-of-kings": lambda: check_gamingnp_api(uid),
+        "magic-chess-go-go": lambda: check_smile_one_api("magicchessgogo", uid, server_id),
         "bigo-live": lambda: check_bigo_native_api(uid),
         "mobile-legends": lambda: perform_ml_check(uid, server_id),
         "mobile-legends-sg": lambda: perform_ml_check(uid, server_id),
