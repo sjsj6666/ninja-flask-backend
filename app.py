@@ -59,13 +59,13 @@ NUVERSE_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
 NUVERSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
 ROM_XD_VALIDATE_URL = "https://xdsdk-intnl-6.xd.com/product/v1/query/game/role"
 ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
-RO_ORIGIN_ONEONE_BASE_URL = "https://games.oneone.com/games/ro-global/api"
-RO_ORIGIN_ONEONE_HEADERS = {
+
+# --- NEW: Razer Gold RO Origin Constants ---
+RAZER_RO_ORIGIN_VALIDATE_URL = "https://gold.razer.com/api/ext/custom/gravity-ragnarok-origin/users"
+RAZER_RO_ORIGIN_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "application/json, text/plain, */*",
-    "Content-Type": "application/json",
-    "Origin": "https://games.oneone.com",
-    "Referer": "https://games.oneone.com/games/ragnarok-origin-global"
+    "Referer": "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin"
 }
 
 
@@ -232,7 +232,7 @@ def check_rom_xd_api(role_id):
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
-def get_ro_origin_oneone_servers():
+def get_ro_origin_servers():
     logging.info("Returning hardcoded RO Origin server list.")
     servers_list = [
         {"server_id": 1, "server_name": "Prontera-(1~3)/Izlude-9(-10)/Morroc-(1~10)"},
@@ -248,49 +248,26 @@ def get_ro_origin_oneone_servers():
     ]
     return {"status": "success", "servers": servers_list}
 
-# *** MODIFIED FUNCTION TO HANDLE CSRF TOKEN ***
-def get_ro_origin_oneone_roles(uid, server_id):
-    url = f"{RO_ORIGIN_ONEONE_BASE_URL}/getRoles"
-    payload = {"userId": uid, "serverId": server_id}
-    logging.info(f"Sending RO Origin Get Roles API (oneone): URL='{url}', Payload={json.dumps(payload)}")
-    
+# --- NEW: Razer Gold RO Origin Function ---
+def check_ro_origin_razer_api(uid, server_id):
+    url = f"{RAZER_RO_ORIGIN_VALIDATE_URL}/{uid}"
+    params = {"serverId": server_id}
+    logging.info(f"Sending Razer RO Origin API: URL='{url}', Params={params}")
     try:
-        # Use a session to persist cookies
-        with requests.Session() as s:
-            # First, visit the main page to get the necessary session cookies
-            s.get("https://games.oneone.com/games/ragnarok-origin-global", headers=RO_ORIGIN_ONEONE_HEADERS, timeout=10)
-            
-            # Now, make the POST request. The session will automatically include the cookies.
-            # We need to find the X-CSRF-TOKEN from the cookies.
-            xsrf_token = s.cookies.get('XSRF-TOKEN')
-            if not xsrf_token:
-                # If the cookie isn't found, we might need a fallback or to raise an error
-                logging.error("Could not retrieve XSRF-TOKEN cookie.")
-                return {"status": "error", "message": "Could not initiate session."}
-            
-            # Add the CSRF token to the headers for the POST request
-            post_headers = RO_ORIGIN_ONEONE_HEADERS.copy()
-            post_headers['X-CSRF-TOKEN'] = requests.utils.unquote(xsrf_token)
-
-            response = s.post(url, json=payload, headers=post_headers, timeout=10, verify=certifi.where())
-            
-            # Check for a successful response
-            if response.status_code == 200:
-                data = response.json()
-                if isinstance(data, list):
-                    return {"status": "success", "roles": data}
-                # Check if the response contains the CSRF error message
-                elif 'message' in data and 'CSRF token mismatch' in data['message']:
-                     return {"status": "error", "message": "CSRF token mismatch."}
-                else:
-                    return {"status": "error", "message": data.get("message", "Could not fetch roles.")}
-            else:
-                # Handle non-200 responses
-                logging.error(f"RO Origin API returned status {response.status_code}: {response.text}")
-                return {"status": "error", "message": "API returned an error status."}
-            
+        response = requests.get(url, params=params, headers=RAZER_RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where())
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("roles") and isinstance(data["roles"], list):
+                transformed_roles = []
+                for role in data["roles"]:
+                    transformed_roles.append({
+                        "roleId": role.get("CharacterId"),
+                        "roleName": role.get("Name")
+                    })
+                return {"status": "success", "roles": transformed_roles}
+        return {"status": "error", "message": "Invalid Secret Code or no characters on this server."}
     except Exception as e:
-        logging.error(f"Exception in get_ro_origin_oneone_roles: {e}")
+        logging.error(f"Razer RO Origin API Error: {e}")
         return {"status": "error", "message": "API Error"}
 
 
@@ -337,7 +314,7 @@ def check_game_id(game_slug, uid, server_id):
 @app.route('/ro-origin/get-servers', methods=['POST', 'OPTIONS'])
 @cross_origin(origins=allowed_origins, supports_credentials=True)
 def handle_ro_origin_get_servers():
-    result = get_ro_origin_oneone_servers()
+    result = get_ro_origin_servers()
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
 @app.route('/ro-origin/get-roles', methods=['POST', 'OPTIONS'])
@@ -348,7 +325,8 @@ def handle_ro_origin_get_roles():
     server_id = data.get('serverId')
     if not uid or not server_id:
         return jsonify({"status": "error", "message": "Secret Code and Server ID are required."}), 400
-    result = get_ro_origin_oneone_roles(uid, server_id)
+    # --- UPDATED TO USE RAZER API ---
+    result = check_ro_origin_razer_api(uid, server_id)
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
 @app.route('/sitemap.xml')
