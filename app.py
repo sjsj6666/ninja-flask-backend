@@ -45,8 +45,6 @@ SMILE_ONE_HEADERS = {
 }
 BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
 BIGO_NATIVE_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/" }
-ENJOYGM_BASE_URL = "https://www.enjoygm.com/portal/supplier/api"
-ENJOYGM_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Referer": "https://www.enjoygm.com/" }
 SPACEGAMING_VALIDATE_URL = "https://spacegaming.sg/wp-json/endpoint/validate_v2"
 SPACEGAMING_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://spacegaming.sg", "Referer": "https://spacegaming.sg/" }
 NETEASE_BASE_URL = "https://pay.neteasegames.com/gameclub"
@@ -63,13 +61,12 @@ RAZER_RO_ORIGIN_HEADERS = {
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin"
 }
-GAMINGNP_HOK_VALIDATE_URL = "https://gaming.com.np/ajaxCheckId"
-GAMINGNP_HOK_HEADERS = {
+GAMINGNP_VALIDATE_URL = "https://gaming.com.np/ajaxCheckId"
+GAMINGNP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "*/*",
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "Origin": "https://gaming.com.np",
-    "Referer": "https://gaming.com.np/topup/honor-of-kings",
     "X-Requested-With": "XMLHttpRequest"
 }
 
@@ -99,7 +96,6 @@ def perform_ml_check(user_id, zone_id):
     if fallback_result.get("status") == "success": fallback_result['region'] = 'N/A'
     return fallback_result
 
-# UPDATED to handle Bloodstrike, Love and Deepspace, and Magic Chess Go Go
 def check_smile_one_api(game_code, uid, server_id=None):
     endpoints = {
         "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole",
@@ -128,7 +124,7 @@ def check_smile_one_api(game_code, uid, server_id=None):
         if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
         params.update({"uid": uid, "sid": "-1", "pid": pid_to_use})
     elif game_code == "magicchessgogo":
-        params.update({"uid": uid, "sid": server_id}) # No PID needed for MCGG
+        params.update({"uid": uid, "sid": server_id})
     else:
         params.update({"uid": uid, "sid": sid_to_use, "pid": pid_to_use})
     
@@ -160,7 +156,6 @@ def check_smile_one_api(game_code, uid, server_id=None):
         logging.error(f"SmileOne API exception for {game_code}: {e}")
         return {"status": "error", "message": f"API Error ({game_code})"}
 
-
 def check_bigo_native_api(uid):
     params = {"isFromApp": "0", "bigoId": uid}
     logging.info(f"Sending Bigo API: Params={params}")
@@ -172,34 +167,34 @@ def check_bigo_native_api(uid):
         return {"status": "error", "message": data.get("errorMsg", "Invalid Bigo ID.")}
     except Exception: return {"status": "error", "message": "API Error (Bigo)"}
 
-def check_enjoygm_api(game_path, uid, server_id=None):
-    params = {"account": uid}
-    if server_id: params["serverid"] = server_id
-    logging.info(f"Sending EnjoyGM API: Game='{game_path}', Params={params}")
-    try:
-        response = requests.get(f"{ENJOYGM_BASE_URL}/{game_path}/userinfo", params=params, headers=ENJOYGM_HEADERS, timeout=10, verify=certifi.where())
-        outer_data = response.json()
-        if outer_data.get("code") == 200 and outer_data.get("data"):
-            inner_data = json.loads(outer_data["data"])
-            username = inner_data.get("accountName") or inner_data.get("username")
-            if (inner_data.get("exist") == 1 or inner_data.get("username")) and username:
-                return {"status": "success", "username": username.strip()}
-        return {"status": "error", "message": "Invalid ID or Server."}
-    except Exception: return {"status": "error", "message": "API Error (EnjoyGM)"}
+# REFACTORED to handle both HOK and PUBGM
+def check_gamingnp_api(game_code, uid):
+    game_params = {
+        "hok": {"categoryId": "3898", "referer": "https://gaming.com.np/topup/honor-of-kings"},
+        "pubgm": {"categoryId": "3920", "referer": "https://gaming.com.np/topup/pubg-mobile-global"}
+    }
+    if game_code not in game_params:
+        return {"status": "error", "message": "Game not configured for this API."}
 
-def check_gamingnp_api(uid):
-    payload = {"userid": uid, "game": "hok", "categoryId": "3898"}
+    payload = {
+        "userid": uid,
+        "game": game_code,
+        "categoryId": game_params[game_code]["categoryId"]
+    }
+    headers = GAMINGNP_HEADERS.copy()
+    headers["Referer"] = game_params[game_code]["referer"]
+    
     logging.info(f"Sending Gaming.com.np API: Payload={payload}")
     try:
-        response = requests.post(GAMINGNP_HOK_VALIDATE_URL, data=payload, headers=GAMINGNP_HOK_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.post(GAMINGNP_VALIDATE_URL, data=payload, headers=headers, timeout=10, verify=certifi.where())
         data = response.json()
         if data.get("success") and data.get("detail", {}).get("valid") == "valid":
             username = data["detail"].get("name")
             if username: return {"status": "success", "username": username.strip()}
         return {"status": "error", "message": "Invalid Player ID."}
     except Exception as e:
-        logging.error(f"Gaming.com.np API Error: {e}")
-        return {"status": "error", "message": "API Error (HOK)"}
+        logging.error(f"Gaming.com.np API Error for {game_code}: {e}")
+        return {"status": "error", "message": f"API Error ({game_code})"}
 
 def check_spacegaming_api(game_id, uid):
     payload = {"username": uid, "game_id": game_id}
@@ -316,15 +311,15 @@ def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
     
     handlers = {
-        "pubg-mobile": lambda: check_enjoygm_api("pubg", uid),
-        "genshin-impact": lambda: check_enjoygm_api("genshin-impact", uid, server_id),
-        "honkai-star-rail": lambda: check_enjoygm_api("honkai", uid, server_id),
-        "zenless-zone-zero": lambda: check_enjoygm_api("zenless-zone-zero", uid, server_id),
+        "pubg-mobile": lambda: check_gamingnp_api("pubgm", uid),
+        "genshin-impact": lambda: check_gamingnp_api("genshin", uid, server_id), # Assuming gaming.np might support it
+        "honkai-star-rail": lambda: check_gamingnp_api("honkai", uid, server_id), # Assuming gaming.np might support it
+        "zenless-zone-zero": lambda: check_gamingnp_api("zenless", uid, server_id), # Assuming gaming.np might support it
         "arena-breakout": lambda: check_spacegaming_api("arena_breakout", uid),
         "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
         "love-and-deepspace": lambda: check_smile_one_api("loveanddeepspace", uid, server_id),
         "ragnarok-m-classic": lambda: check_rom_xd_api(uid),
-        "honor-of-kings": lambda: check_gamingnp_api(uid),
+        "honor-of-kings": lambda: check_gamingnp_api("hok", uid),
         "magic-chess-go-go": lambda: check_smile_one_api("magicchessgogo", uid, server_id),
         "bigo-live": lambda: check_bigo_native_api(uid),
         "mobile-legends": lambda: perform_ml_check(uid, server_id),
