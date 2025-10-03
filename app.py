@@ -16,7 +16,6 @@ import random
 
 app = Flask(__name__)
 
-# --- Configuration ---
 allowed_origins = [
     "http://127.0.0.1:5500",
     "http://localhost:5500",
@@ -27,17 +26,14 @@ CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 10000))
 
-# --- Supabase Client Initialization ---
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise ValueError("CRITICAL: Supabase credentials must be set as environment variables.")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-# --- Your Website's Domain ---
 BASE_URL = "https://www.gameuniverse.co"
 
-# --- API Headers & Constants ---
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -69,9 +65,6 @@ GAMINGNP_HEADERS = {
     "Origin": "https://gaming.com.np",
     "X-Requested-With": "XMLHttpRequest"
 }
-
-
-# --- Helper Functions for ID Validation ---
 
 def perform_ml_check(user_id, zone_id):
     try:
@@ -221,7 +214,7 @@ def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server
     if not razer_server_id:
         return {"status": "error", "message": "Invalid server selection."}
     
-    url = f"{RAZER_BASE_URL}/{api_path}/users/{uid}"
+    url = f"https://gold.razer.com/api/ext/{api_path}/users/{uid}"
     params = {"serverId": razer_server_id}
     
     current_headers = RAZER_HEADERS.copy()
@@ -317,8 +310,6 @@ def check_ro_origin_razer_api(uid, server_id):
         logging.error(f"Razer RO Origin API Error: {e}")
         return {"status": "error", "message": "API Error"}
 
-
-# --- Flask Routes ---
 @app.route('/')
 def home():
     return "NinjaTopUp API Backend is Live!"
