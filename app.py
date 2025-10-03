@@ -314,6 +314,15 @@ def check_ro_origin_razer_api(uid, server_id):
         logging.error(f"Razer RO Origin API Error: {e}")
         return {"status": "error", "message": "API Error"}
 
+def handle_ro_origin_auto_test(uid, server_id):
+    result = check_ro_origin_razer_api(uid, server_id)
+    if result.get("status") == "success" and result.get("roles"):
+        character_names = [role.get("roleName", "Unknown") for role in result["roles"]]
+        username_string = ", ".join(character_names)
+        return {"status": "success", "username": username_string}
+    else:
+        return {"status": "error", "message": result.get("message", "Validation failed or no characters found.")}
+
 @app.route('/')
 def home():
     return "NinjaTopUp API Backend is Live!"
@@ -350,7 +359,8 @@ def check_game_id(game_slug, uid, server_id):
         "identity-v": lambda: check_netease_api("identityv", {"Asia": "2001", "NA-EU": "2011"}.get(server_id), uid),
         "marvel-rivals": lambda: check_netease_api("marvelrivals", "11001", uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_api("3402", uid),
-        "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, server_id)
+        "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, server_id),
+        "ragnarok-origin": lambda: handle_ro_origin_auto_test(uid, server_id)
     }
     
     handler = handlers.get(game_slug)
