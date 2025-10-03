@@ -167,7 +167,6 @@ def check_bigo_native_api(uid):
         return {"status": "error", "message": data.get("errorMsg", "Invalid Bigo ID.")}
     except Exception: return {"status": "error", "message": "API Error (Bigo)"}
 
-# REFACTORED to handle both HOK and PUBGM
 def check_gamingnp_api(game_code, uid):
     game_params = {
         "hok": {"categoryId": "3898", "referer": "https://gaming.com.np/topup/honor-of-kings"},
@@ -220,6 +219,33 @@ def check_netease_api(game_path, server_id, role_id):
             if username: return {"status": "success", "username": username.strip()}
         return {"status": "error", "message": "Invalid ID or Server."}
     except Exception: return {"status": "error", "message": "API Error (Netease)"}
+
+# NEW UNIFIED FUNCTION FOR RAZER HOYOVERSE GAMES
+def check_razer_hoyoverse_api(game_path, server_id_map, uid, server_name):
+    razer_server_id = server_id_map.get(server_name)
+    if not razer_server_id:
+        return {"status": "error", "message": "Invalid server selection."}
+    
+    url = f"{RAZER_BASE_URL}/{game_path}/users/{uid}"
+    params = {"serverId": razer_server_id}
+    
+    current_headers = RAZER_HEADERS.copy()
+    # The referer is based on the game path's last segment
+    referer_slug = game_path.split('/')[-1]
+    current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{referer_slug}"
+    
+    logging.info(f"Sending Razer Hoyoverse API: URL='{url}', Params={params}")
+    try:
+        response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        data = response.json()
+        if response.status_code == 200 and data.get("username"):
+            return {"status": "success", "username": data["username"].strip()}
+        else:
+            message = data.get("message", "Invalid ID or Server.")
+            return {"status": "error", "message": message}
+    except Exception as e:
+        logging.error(f"Razer Hoyoverse API Error for {game_path}: {e}")
+        return {"status": "error", "message": "API Error"}
 
 def check_razer_api(game_path, uid, server_id):
     params = {"serverId": server_id}
@@ -304,17 +330,26 @@ def check_ro_origin_razer_api(uid, server_id):
 def home():
     return "NinjaTopUp API Backend is Live!"
 
+@app.route('/health')
+def health_check():
+    return jsonify({"status": "healthy"}), 200
+
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
 @cross_origin(origins=allowed_origins, supports_credentials=True)
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
     
+    # Define server mappings for Razer Hoyoverse APIs
+    genshin_servers = {"Asia": "os_asia", "America": "os_usa", "Europe": "os_euro", "TW,HK,MO": "os_cht"}
+    hsr_servers = {"Asia": "prod_official_asia", "America": "prod_official_usa", "Europe": "prod_official_eur", "TW/HK/MO": "prod_official_cht"}
+    zzz_servers = {"Asia": "prod_gf_jp", "America": "prod_gf_us", "Europe": "prod_gf_eu", "TW/HK/MO": "prod_gf_sg"}
+
     handlers = {
         "pubg-mobile": lambda: check_gamingnp_api("pubgm", uid),
-        "genshin-impact": lambda: check_gamingnp_api("genshin", uid, server_id), # Assuming gaming.np might support it
-        "honkai-star-rail": lambda: check_gamingnp_api("honkai", uid, server_id), # Assuming gaming.np might support it
-        "zenless-zone-zero": lambda: check_gamingnp_api("zenless", uid, server_id), # Assuming gaming.np might support it
+        "genshin-impact": lambda: check_razer_hoyoverse_api("genshinimpact", genshin_servers, uid, server_id),
+        "honkai-star-rail": lambda: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", hsr_servers, uid, server_id),
+        "zenless-zone-zero": lambda: check_razer_hoyoverse_api("cognosphere-zenless-zone-zero", zzz_servers, uid, server_id),
         "arena-breakout": lambda: check_spacegaming_api("arena_breakout", uid),
         "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
         "love-and-deepspace": lambda: check_smile_one_api("loveanddeepspace", uid, server_id),
@@ -324,6 +359,7 @@ def check_game_id(game_slug, uid, server_id):
         "bigo-live": lambda: check_bigo_native_api(uid),
         "mobile-legends": lambda: perform_ml_check(uid, server_id),
         "mobile-legends-sg": lambda: perform_ml_check(uid, server_id),
+        "mobile-legends-my": lambda: perform_ml_check(uid, server_id),
         "identity-v": lambda: check_netease_api("identityv", {"Asia": "2001", "NA-EU": "2011"}.get(server_id), uid),
         "marvel-rivals": lambda: check_netease_api("marvelrivals", "11001", uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_api("3402", uid),
@@ -355,12 +391,6 @@ def handle_ro_origin_get_roles():
         return jsonify({"status": "error", "message": "Secret Code and Server ID are required."}), 400
     result = check_ro_origin_razer_api(uid, server_id)
     return jsonify(result), 200 if result.get("status") == "success" else 400
-
-# --- ADD THIS NEW ROUTE ---
-@app.route('/health')
-def health_check():
-    """A simple endpoint for uptime monitoring to keep the service alive."""
-    return jsonify({"status": "healthy"}), 200
 
 @app.route('/sitemap.xml')
 def generate_sitemap():
