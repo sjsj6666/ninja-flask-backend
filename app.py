@@ -214,7 +214,11 @@ def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server
     if not razer_server_id:
         return {"status": "error", "message": "Invalid server selection."}
     
-    url = f"https://gold.razer.com/api/ext/{api_path}/users/{uid}"
+    if api_path == "genshinimpact":
+        url = f"https://gold.razer.com/api/ext/{api_path}/users/{uid}"
+    else:
+        url = f"{RAZER_BASE_URL}/{api_path}/users/{uid}"
+
     params = {"serverId": razer_server_id}
     
     current_headers = RAZER_HEADERS.copy()
