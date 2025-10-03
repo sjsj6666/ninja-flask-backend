@@ -175,11 +175,7 @@ def check_gamingnp_api(game_code, uid):
     if game_code not in game_params:
         return {"status": "error", "message": "Game not configured for this API."}
 
-    payload = {
-        "userid": uid,
-        "game": game_code,
-        "categoryId": game_params[game_code]["categoryId"]
-    }
+    payload = { "userid": uid, "game": game_code, "categoryId": game_params[game_code]["categoryId"] }
     headers = GAMINGNP_HEADERS.copy()
     headers["Referer"] = game_params[game_code]["referer"]
     
@@ -220,7 +216,6 @@ def check_netease_api(game_path, server_id, role_id):
         return {"status": "error", "message": "Invalid ID or Server."}
     except Exception: return {"status": "error", "message": "API Error (Netease)"}
 
-# MODIFIED: Takes separate api_path and referer_slug
 def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server_name):
     razer_server_id = server_id_map.get(server_name)
     if not razer_server_id:
@@ -344,11 +339,9 @@ def check_game_id(game_slug, uid, server_id):
 
     handlers = {
         "pubg-mobile": lambda: check_gamingnp_api("pubgm", uid),
-        # UPDATED HOYOVERSE HANDLERS
         "genshin-impact": lambda: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, uid, server_id),
         "honkai-star-rail": lambda: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", "hsr", hsr_servers, uid, server_id),
         "zenless-zone-zero": lambda: check_razer_hoyoverse_api("cognosphere-zenless-zone-zero", "zenless-zone-zero", zzz_servers, uid, server_id),
-        
         "arena-breakout": lambda: check_spacegaming_api("arena_breakout", uid),
         "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
         "love-and-deepspace": lambda: check_smile_one_api("loveanddeepspace", uid, server_id),
