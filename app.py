@@ -277,6 +277,7 @@ def check_rom_xd_api(role_id):
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
+# --- MODIFIED: Updated Ragnarok Origin Server List ---
 def get_ro_origin_servers():
     logging.info("Returning hardcoded RO Origin server list.")
     servers_list = [
@@ -292,6 +293,7 @@ def get_ro_origin_servers():
         {"server_id": 107, "server_name": "Hugel"}
     ]
     return {"status": "success", "servers": servers_list}
+# --- END MODIFICATION ---
 
 def check_ro_origin_razer_api(uid, server_id):
     url = f"{RAZER_RO_ORIGIN_VALIDATE_URL}/{uid}"
@@ -372,7 +374,7 @@ def check_game_id(game_slug, uid, server_id):
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
-@app.route('/ro-origin/get-servers', methods=['POST', 'OPTIONS'])
+@app.route('/ro-origin/get-servers', methods=['GET', 'OPTIONS'])
 @cross_origin(origins=allowed_origins, supports_credentials=True)
 def handle_ro_origin_get_servers():
     result = get_ro_origin_servers()
