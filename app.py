@@ -277,7 +277,6 @@ def check_rom_xd_api(role_id):
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
-# --- MODIFIED: Updated Ragnarok Origin Server List ---
 def get_ro_origin_servers():
     logging.info("Returning hardcoded RO Origin server list.")
     servers_list = [
@@ -293,7 +292,6 @@ def get_ro_origin_servers():
         {"server_id": 107, "server_name": "Hugel"}
     ]
     return {"status": "success", "servers": servers_list}
-# --- END MODIFICATION ---
 
 def check_ro_origin_razer_api(uid, server_id):
     url = f"{RAZER_RO_ORIGIN_VALIDATE_URL}/{uid}"
@@ -316,15 +314,6 @@ def check_ro_origin_razer_api(uid, server_id):
         logging.error(f"Razer RO Origin API Error: {e}")
         return {"status": "error", "message": "API Error"}
 
-def handle_ro_origin_auto_test(uid, server_id):
-    result = check_ro_origin_razer_api(uid, server_id)
-    if result.get("status") == "success" and result.get("roles"):
-        character_names = [role.get("roleName", "Unknown") for role in result["roles"]]
-        username_string = ", ".join(character_names)
-        return {"status": "success", "username": username_string}
-    else:
-        return {"status": "error", "message": result.get("message", "Validation failed or no characters found.")}
-
 @app.route('/')
 def home():
     return "NinjaTopUp API Backend is Live!"
@@ -338,6 +327,11 @@ def health_check():
 @cross_origin(origins=allowed_origins, supports_credentials=True)
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
+    
+    if game_slug == "ragnarok-origin":
+        result = check_ro_origin_razer_api(uid, server_id)
+        status_code = 200 if result.get("status") == "success" else 400
+        return jsonify(result), status_code
     
     genshin_servers = {"Asia": "os_asia", "America": "os_usa", "Europe": "os_euro", "TW,HK,MO": "os_cht"}
     hsr_servers = {"Asia": "prod_official_asia", "America": "prod_official_usa", "Europe": "prod_official_eur", "TW/HK/MO": "prod_official_cht"}
@@ -362,12 +356,14 @@ def check_game_id(game_slug, uid, server_id):
         "marvel-rivals": lambda: check_netease_api("marvelrivals", "11001", uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_api("3402", uid),
         "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, server_id),
-        "ragnarok-origin": lambda: handle_ro_origin_auto_test(uid, server_id)
     }
     
     handler = handlers.get(game_slug)
     if handler:
         result = handler()
+        if result.get("status") == "success" and "roles" in result and len(result["roles"]) == 1:
+            result["username"] = result["roles"][0].get("roleName")
+            del result["roles"]
     else:
         result = {"status": "error", "message": f"Validation not configured for: {game_slug}"}
     
