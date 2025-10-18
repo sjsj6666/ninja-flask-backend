@@ -347,7 +347,7 @@ def check_game_id(game_slug, uid, server_id):
         "honkai-star-rail": lambda: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", "hsr", hsr_servers, uid, server_id),
         "zenless-zone-zero": lambda: check_razer_hoyoverse_api("cognosphere-zenless-zone-zero", "zenless-zone-zero", zzz_servers, uid, server_id),
         "arena-breakout": lambda: check_spacegaming_api("arena_breakout", uid),
-        "bloodstrike": lambda: check_smile_one_api("bloodstrike", uid),
+        "blood-strike": lambda: check_smile_one_api("bloodstrike", uid),
         "love-and-deepspace": lambda: check_smile_one_api("loveanddeepspace", uid, server_id),
         "ragnarok-m-classic": lambda: check_rom_xd_api(uid),
         "honor-of-kings": lambda: check_gamingnp_api("hok", uid),
