@@ -336,6 +336,7 @@ def check_game_id(game_slug, uid, server_id):
     genshin_servers = {"Asia": "os_asia", "America": "os_usa", "Europe": "os_euro", "TW,HK,MO": "os_cht"}
     hsr_servers = {"Asia": "prod_official_asia", "America": "prod_official_usa", "Europe": "prod_official_eur", "TW/HK/MO": "prod_official_cht"}
     zzz_servers = {"Asia": "prod_gf_jp", "America": "prod_gf_us", "Europe": "prod_gf_eu", "TW/HK/MO": "prod_gf_sg"}
+    snowbreak_servers = {"Asia": "225", "SEA": "215", "Americas": "235", "Europe": "245"}
 
     handlers = {
         "pubg-mobile": lambda: check_gamingnp_api("pubgm", uid),
@@ -355,7 +356,7 @@ def check_game_id(game_slug, uid, server_id):
         "identity-v": lambda: check_netease_api("identityv", {"Asia": "2001", "NA-EU": "2011"}.get(server_id), uid),
         "marvel-rivals": lambda: check_netease_api("marvelrivals", "11001", uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_api("3402", uid),
-        "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, server_id),
+        "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(server_id)),
     }
     
     handler = handlers.get(game_slug)
