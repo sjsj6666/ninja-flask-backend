@@ -277,47 +277,6 @@ def check_rom_xd_api(role_id):
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
     except Exception: return {"status": "error", "message": "API Error (ROM)"}
 
-def check_zzz_direct(uid, server_name):
-    server_map = {
-        "America": "prod_gf_us",
-        "Asia": "prod_gf_jp", 
-        "Europe": "prod_gf_eu",
-        "TW/HK/MO": "prod_gf_sg"
-    }
-    
-    server_id = server_map.get(server_name)
-    if not server_id:
-        return {"status": "error", "message": "Invalid server selection."}
-    
-    url = f"https://gold.razer.com/api/ext/unified/users/{uid}"
-    params = {
-        "regionId": "1",
-        "serverId": server_id,
-        "merchantServiceId": "647"
-    }
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://gold.razer.com/my/en/gold/catalog/zenless-zone-zero",
-        "Origin": "https://gold.razer.com"
-    }
-    
-    logging.info(f"Sending ZZZ API: URL='{url}', Params={params}")
-    
-    try:
-        response = requests.get(url, params=params, headers=headers, timeout=10, verify=certifi.where())
-        data = response.json()
-        
-        if response.status_code == 200 and data.get("username"):
-            return {"status": "success", "username": data["username"].strip()}
-        else:
-            message = data.get("message", "Invalid ID or Server.")
-            return {"status": "error", "message": message}
-    except Exception as e:
-        logging.error(f"ZZZ API Error: {e}")
-        return {"status": "error", "message": "API Error"}
-
 def get_ro_origin_servers():
     logging.info("Returning hardcoded RO Origin server list.")
     servers_list = [
@@ -383,8 +342,7 @@ def check_game_id(game_slug, uid, server_id):
         "pubg-mobile": lambda: check_gamingnp_api("pubgm", uid),
         "genshin-impact": lambda: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, uid, server_id),
         "honkai-star-rail": lambda: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", "hsr", hsr_servers, uid, server_id),
-        "zenless-zone-zero": lambda: check_zzz_direct(uid, server_id),
-        "zenless-zero": lambda: check_zzz_direct(uid, server_id),
+        "zenless-zone-zero": lambda: check_razer_hoyoverse_api("cognosphere-zenless-zone-zero", "zenless-zone-zero", zzz_servers, uid, server_id),
         "arena-breakout": lambda: check_spacegaming_api("arena_breakout", uid),
         "blood-strike": lambda: check_smile_one_api("bloodstrike", uid),
         "love-and-deepspace": lambda: check_smile_one_api("loveanddeepspace", uid, server_id),
