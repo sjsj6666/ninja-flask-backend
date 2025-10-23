@@ -326,9 +326,25 @@ def health_check():
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
 @cross_origin(origins=allowed_origins, supports_credentials=True)
 def check_game_id(game_slug, uid, server_id):
-    if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
-    
-    if game_slug == "ragnarok-origin":
+    if not uid:
+        return jsonify({"status": "error", "message": "User ID is required."}), 400
+
+    try:
+        game_record = supabase.from_('games').select('validation_slug').eq('game_key', game_slug).single().execute()
+        
+        if not game_record.data:
+            return jsonify({"status": "error", "message": "Game configuration not found."}), 404
+        
+        validation_identifier = game_record.data.get('validation_slug')
+
+        if not validation_identifier:
+            return jsonify({"status": "error", "message": f"Validation not enabled for: {game_slug}"}), 400
+
+    except Exception as e:
+        logging.error(f"Database error looking up game slug '{game_slug}': {e}")
+        return jsonify({"status": "error", "message": "Internal server error during game lookup."}), 500
+
+    if validation_identifier == "ragnarok-origin":
         result = check_ro_origin_razer_api(uid, server_id)
         status_code = 200 if result.get("status") == "success" else 400
         return jsonify(result), status_code
@@ -359,14 +375,14 @@ def check_game_id(game_slug, uid, server_id):
         "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(server_id)),
     }
     
-    handler = handlers.get(game_slug)
+    handler = handlers.get(validation_identifier)
     if handler:
         result = handler()
         if result.get("status") == "success" and "roles" in result and len(result["roles"]) == 1:
             result["username"] = result["roles"][0].get("roleName")
             del result["roles"]
     else:
-        result = {"status": "error", "message": f"Validation not configured for: {game_slug}"}
+        result = {"status": "error", "message": f"Validation not configured for this game type: '{validation_identifier}'"}
     
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
