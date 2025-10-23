@@ -209,23 +209,22 @@ def check_netease_api(game_path, server_id, role_id):
         return {"status": "error", "message": "Invalid ID or Server."}
     except Exception: return {"status": "error", "message": "API Error (Netease)"}
 
-def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, merchant_service_id, uid, server_name):
+def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server_name):
     razer_server_id = server_id_map.get(server_name)
     if not razer_server_id:
         return {"status": "error", "message": "Invalid server selection."}
-
-    url = f"https://gold.razer.com/api/ext/unified/users/{uid}"
     
-    params = {
-        "regionId": "1",
-        "serverId": razer_server_id,
-        "merchantServiceId": merchant_service_id
-    }
+    if api_path == "genshinimpact":
+        url = f"https://gold.razer.com/api/ext/{api_path}/users/{uid}"
+    else:
+        url = f"{RAZER_BASE_URL}/{api_path}/users/{uid}"
+
+    params = {"serverId": razer_server_id}
     
     current_headers = RAZER_HEADERS.copy()
     current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{referer_slug}"
     
-    logging.info(f"Sending Razer Hoyoverse API (Unified): URL='{url}', Params={params}")
+    logging.info(f"Sending Razer Hoyoverse API: URL='{url}', Params={params}")
     try:
         response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
         data = response.json()
@@ -341,9 +340,9 @@ def check_game_id(game_slug, uid, server_id):
 
     handlers = {
         "pubg-mobile": lambda: check_gamingnp_api("pubgm", uid),
-        "genshin-impact": lambda: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, "233", uid, server_id),
-        "honkai-star-rail": lambda: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", "hsr", hsr_servers, "579", uid, server_id),
-        "zenless-zone-zero": lambda: check_razer_hoyoverse_api("cognosphere-zenless-zone-zero", "zenless-zone-zero", zzz_servers, "647", uid, server_id),
+        "genshin-impact": lambda: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, uid, server_id),
+        "honkai-star-rail": lambda: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", "hsr", hsr_servers, uid, server_id),
+        "zenless-zone-zero": lambda: check_razer_hoyoverse_api("cognosphere-zenless-zone-zero", "zenless-zone-zero", zzz_servers, uid, server_id),
         "arena-breakout": lambda: check_spacegaming_api("arena_breakout", uid),
         "blood-strike": lambda: check_smile_one_api("bloodstrike", uid),
         "love-and-deepspace": lambda: check_smile_one_api("loveanddeepspace", uid, server_id),
