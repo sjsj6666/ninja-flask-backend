@@ -403,6 +403,7 @@ def generate_sitemap():
     except Exception as e: return jsonify({"error": "Could not generate sitemap"}), 500
 
 @app.route('/create-paynow-qr', methods=['POST'])
+@cross_origin(origins=allowed_origins, supports_credentials=True) # ADD THIS LINE
 def create_paynow_qr():
     data = request.get_json()
     if not data or 'amount' not in data or 'order_id' not in data: return jsonify({'error': 'Amount and order_id are required.'}), 400
