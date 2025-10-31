@@ -3,6 +3,6 @@ Flask-Cors
 supabase
 requests
 certifi
-gunicorn
-beautifulsoup4
 pycountry
+gunicorn
+pytz
