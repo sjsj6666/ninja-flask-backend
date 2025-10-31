@@ -9,19 +9,14 @@ import certifi
 import pycountry
 import hashlib
 from flask import Flask, jsonify, request, Response
-from flask_cors import CORS, cross_origin
+from flask_cors import CORS
 from supabase import create_client, Client
 from datetime import datetime, timedelta
 import random
 
 app = Flask(__name__)
 
-allowed_origins = [
-    "http://127.0.0.1:5500",
-    "http://localhost:5500",
-    "https://coxx.netlify.app"
-]
-CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
+CORS(app, supports_credentials=True)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 10000))
@@ -324,7 +319,6 @@ def health_check():
 
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
-@cross_origin(origins=allowed_origins, supports_credentials=True)
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
     
@@ -372,13 +366,11 @@ def check_game_id(game_slug, uid, server_id):
     return jsonify(result), status_code
 
 @app.route('/ro-origin/get-servers', methods=['GET', 'OPTIONS'])
-@cross_origin(origins=allowed_origins, supports_credentials=True)
 def handle_ro_origin_get_servers():
     result = get_ro_origin_servers()
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
 @app.route('/ro-origin/get-roles', methods=['POST', 'OPTIONS'])
-@cross_origin(origins=allowed_origins, supports_credentials=True)
 def handle_ro_origin_get_roles():
     data = request.get_json()
     uid = data.get('userId')
@@ -403,7 +395,6 @@ def generate_sitemap():
     except Exception as e: return jsonify({"error": "Could not generate sitemap"}), 500
 
 @app.route('/create-paynow-qr', methods=['POST'])
-@cross_origin(origins=allowed_origins, supports_credentials=True) # ADD THIS LINE
 def create_paynow_qr():
     data = request.get_json()
     if not data or 'amount' not in data or 'order_id' not in data: return jsonify({'error': 'Amount and order_id are required.'}), 400
