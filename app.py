@@ -97,13 +97,10 @@ def check_smile_one_api(game_code, uid, server_id=None):
         "magicchessgogo": "https://www.smile.one/br/merchant/game/checkrole?product=magicchessgogo"
     }
     pids = {"mobilelegends": "25", "bloodstrike": "20294"}
-
     if game_code not in endpoints: return {"status": "error", "message": f"Game not configured: {game_code}"}
-    
     pid_to_use = pids.get(game_code)
     sid_to_use = server_id
     params = {"checkrole": "1"}
-
     if game_code == "loveanddeepspace":
         pid_to_use = "18762"
         server_sid_map = {"Asia": "81", "America": "82", "Europe": "83"}
@@ -120,11 +117,9 @@ def check_smile_one_api(game_code, uid, server_id=None):
         params.update({"uid": uid, "sid": server_id})
     else:
         params.update({"uid": uid, "sid": sid_to_use, "pid": pid_to_use})
-    
     logging.info(f"Sending SmileOne API: Game='{game_code}', URL='{endpoints[game_code]}', Params={params}")
     try:
         response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
-        
         data = {}
         if "text/html" in response.headers.get('content-type', ''):
             try:
@@ -137,11 +132,9 @@ def check_smile_one_api(game_code, uid, server_id=None):
                 return {"status": "error", "message": "API response format error."}
         else:
             data = response.json()
-
         if data.get("code") == 200:
             username = data.get("username") or data.get("nickname")
             if username: return {"status": "success", "username": username.strip()}
-        
         error_message = data.get("message", data.get("info", "Invalid ID."))
         if "não existe" in str(error_message): error_message = "Invalid User ID."
         return {"status": "error", "message": error_message}
@@ -167,11 +160,9 @@ def check_gamingnp_api(game_code, uid):
     }
     if game_code not in game_params:
         return {"status": "error", "message": "Game not configured for this API."}
-
     payload = { "userid": uid, "game": game_code, "categoryId": game_params[game_code]["categoryId"] }
     headers = GAMINGNP_HEADERS.copy()
     headers["Referer"] = game_params[game_code]["referer"]
-    
     logging.info(f"Sending Gaming.com.np API: Payload={payload}")
     try:
         response = requests.post(GAMINGNP_VALIDATE_URL, data=payload, headers=headers, timeout=10, verify=certifi.where())
@@ -213,17 +204,13 @@ def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server
     razer_server_id = server_id_map.get(server_name)
     if not razer_server_id:
         return {"status": "error", "message": "Invalid server selection."}
-    
     if api_path == "genshinimpact":
         url = f"https://gold.razer.com/api/ext/{api_path}/users/{uid}"
     else:
         url = f"{RAZER_BASE_URL}/{api_path}/users/{uid}"
-
     params = {"serverId": razer_server_id}
-    
     current_headers = RAZER_HEADERS.copy()
     current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{referer_slug}"
-    
     logging.info(f"Sending Razer Hoyoverse API: URL='{url}', Params={params}")
     try:
         response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
@@ -327,17 +314,14 @@ def health_check():
 @cross_origin(origins=allowed_origins, supports_credentials=True)
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
-    
     if game_slug == "ragnarok-origin":
         result = check_ro_origin_razer_api(uid, server_id)
         status_code = 200 if result.get("status") == "success" else 400
         return jsonify(result), status_code
-    
     genshin_servers = {"Asia": "os_asia", "America": "os_usa", "Europe": "os_euro", "TW,HK,MO": "os_cht"}
     hsr_servers = {"Asia": "prod_official_asia", "America": "prod_official_usa", "Europe": "prod_official_eur", "TW/HK/MO": "prod_official_cht"}
     zzz_servers = {"Asia": "prod_gf_jp", "America": "prod_gf_us", "Europe": "prod_gf_eu", "TW/HK/MO": "prod_gf_sg"}
     snowbreak_servers = {"Asia": "225", "SEA": "215", "Americas": "235", "Europe": "245"}
-
     handlers = {
         "pubg-mobile": lambda: check_gamingnp_api("pubgm", uid),
         "genshin-impact": lambda: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, uid, server_id),
@@ -358,7 +342,6 @@ def check_game_id(game_slug, uid, server_id):
         "ragnarok-x-next-generation": lambda: check_nuverse_api("3402", uid),
         "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(server_id)),
     }
-    
     handler = handlers.get(game_slug)
     if handler:
         result = handler()
@@ -367,7 +350,6 @@ def check_game_id(game_slug, uid, server_id):
             del result["roles"]
     else:
         result = {"status": "error", "message": f"Validation not configured for: {game_slug}"}
-    
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
@@ -403,26 +385,48 @@ def generate_sitemap():
     except Exception as e: return jsonify({"error": "Could not generate sitemap"}), 500
 
 @app.route('/create-paynow-qr', methods=['POST'])
-@cross_origin(origins=allowed_origins, supports_credentials=True) # ADD THIS LINE
+@cross_origin(origins=allowed_origins, supports_credentials=True)
 def create_paynow_qr():
     data = request.get_json()
-    if not data or 'amount' not in data or 'order_id' not in data: return jsonify({'error': 'Amount and order_id are required.'}), 400
+    if not data or 'amount' not in data or 'order_id' not in data:
+        return jsonify({'error': 'Amount and order_id are required.'}), 400
     try:
-        amount = f"{float(data['amount']):.2f}"; order_id = str(data['order_id'])
-        paynow_uen = os.environ.get('PAYNOW_UEN'); company_name = os.environ.get('PAYNOW_COMPANY_NAME')
-        if not paynow_uen or not company_name: raise ValueError("PAYNOW_UEN and PAYNOW_COMPANY_NAME must be set.")
-        maybank_url = "https://sslsecure.maybank.com.sg/scripts/mbb_qrcode/mbb_qrcode.jsp"
-        expiry_date = (datetime.now() + timedelta(days=1)).strftime('%Y%m%d')
-        params = {'proxyValue': paynow_uen, 'proxyType': 'UEN', 'merchantName': company_name, 'amount': amount, 'reference': order_id, 'amountInd': 'N', 'expiryDate': expiry_date, 'rnd': random.random()}
-        headers = {'User-Agent': 'Mozilla/5.0...', 'Referer': 'https://sslsecure.maybank.com.sg/'}
-        response = requests.get(maybank_url, params=params, headers=headers, timeout=20, verify=True)
+        paynow_uen = os.environ.get('PAYNOW_UEN')
+        company_name = os.environ.get('PAYNOW_COMPANY_NAME')
+        if not paynow_uen or not company_name:
+            raise ValueError("PAYNOW_UEN and PAYNOW_COMPANY_NAME must be set in environment variables.")
+        amount = f"{float(data['amount']):.2f}"
+        order_id = str(data['order_id'])
+        expiry_time = (datetime.now() + timedelta(minutes=15)).strftime('%Y/%m/%d %H:%M')
+        base_url = "https://www.sgqrcode.com/paynow"
+        params = {
+            'mobile': '',
+            'uen': paynow_uen,
+            'editable': 0,
+            'amount': amount,
+            'expiry': expiry_time,
+            'ref_id': order_id,
+            'company': company_name
+        }
+        logging.info(f"Requesting QR code from sgqrcode.com with params: {params}")
+        response = requests.get(base_url, params=params, timeout=20)
         response.raise_for_status()
         if 'image/png' in response.headers.get('Content-Type', ''):
             encoded_string = base64.b64encode(response.content).decode('utf-8')
             qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
-            return jsonify({'qr_code_data': qr_code_data_uri, 'message': 'QR code generated successfully.'})
-        return jsonify({'error': 'Invalid response from QR service.'}), 502
-    except Exception as e: return jsonify({"error": str(e)}), 500
+            return jsonify({
+                'qr_code_data': qr_code_data_uri,
+                'message': 'QR code generated successfully.'
+            })
+        else:
+            logging.error(f"sgqrcode.com returned non-image content: {response.text}")
+            return jsonify({'error': 'Invalid response from QR code service.'}), 502
+    except requests.exceptions.RequestException as e:
+        logging.error(f"HTTP Request to QR service failed: {e}")
+        return jsonify({"error": "Could not connect to the QR code generation service."}), 504
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during QR generation: {e}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
