@@ -12,6 +12,7 @@ from flask import Flask, jsonify, request, Response
 from flask_cors import CORS, cross_origin
 from supabase import create_client, Client
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 import random
 
 app = Flask(__name__)
@@ -408,24 +409,14 @@ def create_paynow_qr():
             'ref_id': order_id,
             'company': company_name
         }
-        logging.info(f"Requesting QR code from sgqrcode.com with params: {params}")
-        response = requests.get(base_url, params=params, timeout=20)
-        response.raise_for_status()
-        if 'image/png' in response.headers.get('Content-Type', ''):
-            encoded_string = base64.b64encode(response.content).decode('utf-8')
-            qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
-            return jsonify({
-                'qr_code_data': qr_code_data_uri,
-                'message': 'QR code generated successfully.'
-            })
-        else:
-            logging.error(f"sgqrcode.com returned non-image content: {response.text}")
-            return jsonify({'error': 'Invalid response from QR code service.'}), 502
-    except requests.exceptions.RequestException as e:
-        logging.error(f"HTTP Request to QR service failed: {e}")
-        return jsonify({"error": "Could not connect to the QR code generation service."}), 504
+        qr_code_url = f"{base_url}?{urlencode(params)}"
+        logging.info(f"Generated QR Code URL: {qr_code_url}")
+        return jsonify({
+            'qr_code_url': qr_code_url,
+            'message': 'QR code URL generated successfully.'
+        })
     except Exception as e:
-        logging.error(f"An unexpected error occurred during QR generation: {e}")
+        logging.error(f"An unexpected error occurred during QR URL generation: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
