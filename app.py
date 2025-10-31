@@ -8,6 +8,7 @@ import requests
 import certifi
 import pycountry
 import hashlib
+import pytz
 from flask import Flask, jsonify, request, Response
 from flask_cors import CORS, cross_origin
 from supabase import create_client, Client
@@ -398,19 +399,22 @@ def create_paynow_qr():
             raise ValueError("PAYNOW_UEN and PAYNOW_COMPANY_NAME must be set in environment variables.")
         amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
-        expiry_time = (datetime.now() + timedelta(minutes=15)).strftime('%Y/%m/%d %H:%M')
+        sgt_timezone = pytz.timezone('Asia/Singapore')
+        now_in_sgt = datetime.now(sgt_timezone)
+        expiry_time_sgt = now_in_sgt + timedelta(minutes=15)
+        expiry_str = expiry_time_sgt.strftime('%Y/%m/%d %H:%M')
         base_url = "https://www.sgqrcode.com/paynow"
         params = {
             'mobile': '',
             'uen': paynow_uen,
             'editable': 0,
             'amount': amount,
-            'expiry': expiry_time,
+            'expiry': expiry_str,
             'ref_id': order_id,
             'company': company_name
         }
         qr_code_url = f"{base_url}?{urlencode(params)}"
-        logging.info(f"Generated QR Code URL: {qr_code_url}")
+        logging.info(f"Generated QR Code URL with SGT expiry: {qr_code_url}")
         return jsonify({
             'qr_code_url': qr_code_url,
             'message': 'QR code URL generated successfully.'
