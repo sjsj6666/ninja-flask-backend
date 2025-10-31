@@ -393,34 +393,55 @@ def create_paynow_qr():
     if not data or 'amount' not in data or 'order_id' not in data:
         return jsonify({'error': 'Amount and order_id are required.'}), 400
     try:
+        expiry_minutes = 15
+        try:
+            response = supabase.table('settings').select('value').eq('key', 'qr_code_expiry_minutes').single().execute()
+            if response.data and response.data.get('value'):
+                expiry_minutes = int(response.data['value'])
+        except Exception as e:
+            logging.error(f"Could not fetch expiry setting from Supabase, using default. Error: {e}")
+
         paynow_uen = os.environ.get('PAYNOW_UEN')
         company_name = os.environ.get('PAYNOW_COMPANY_NAME')
         if not paynow_uen or not company_name:
             raise ValueError("PAYNOW_UEN and PAYNOW_COMPANY_NAME must be set in environment variables.")
         amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
+        
         sgt_timezone = pytz.timezone('Asia/Singapore')
         now_in_sgt = datetime.now(sgt_timezone)
-        expiry_time_sgt = now_in_sgt + timedelta(minutes=15)
-        expiry_str = expiry_time_sgt.strftime('%Y/%m/%d %H:%M')
-        base_url = "https://www.sgqrcode.com/paynow"
+        expiry_time_sgt = now_in_sgt + timedelta(minutes=expiry_minutes)
+        expiry_timestamp = int(expiry_time_sgt.timestamp() * 1000)
+
+        maybank_url = "https://sslsecure.maybank.com.sg/scripts/mbb_qrcode/mbb_qrcode.jsp"
+        expiry_date_for_api = (datetime.now(sgt_timezone) + timedelta(days=1)).strftime('%Y%m%d')
+
         params = {
-            'mobile': '',
-            'uen': paynow_uen,
-            'editable': 0,
+            'proxyValue': paynow_uen,
+            'proxyType': 'UEN',
+            'merchantName': company_name,
             'amount': amount,
-            'expiry': expiry_str,
-            'ref_id': order_id,
-            'company': company_name
+            'reference': order_id,
+            'amountInd': 'N',
+            'expiryDate': expiry_date_for_api,
+            'rnd': random.random()
         }
-        qr_code_url = f"{base_url}?{urlencode(params)}"
-        logging.info(f"Generated QR Code URL with SGT expiry: {qr_code_url}")
-        return jsonify({
-            'qr_code_url': qr_code_url,
-            'message': 'QR code URL generated successfully.'
-        })
+        
+        headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://sslsecure.maybank.com.sg/'}
+        response = requests.get(maybank_url, params=params, headers=headers, timeout=20, verify=True)
+        response.raise_for_status()
+
+        if 'image/png' in response.headers.get('Content-Type', ''):
+            encoded_string = base64.b64encode(response.content).decode('utf-8')
+            qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
+            return jsonify({
+                'qr_code_data': qr_code_data_uri, 
+                'expiry_timestamp': expiry_timestamp,
+                'message': 'QR code generated successfully.'
+            })
+        
+        return jsonify({'error': 'Invalid response from QR service.'}), 502
     except Exception as e:
-        logging.error(f"An unexpected error occurred during QR URL generation: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
