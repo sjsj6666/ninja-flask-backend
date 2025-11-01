@@ -402,9 +402,9 @@ def create_paynow_qr():
             logging.error(f"Could not fetch expiry setting from Supabase, using default. Error: {e}")
 
         paynow_uen = os.environ.get('PAYNOW_UEN')
-        company_name = os.environ.get('PAYNOW_COMPANY_NAME')
-        if not paynow_uen or not company_name:
-            raise ValueError("PAYNOW_UEN and PAYNOW_COMPANY_NAME must be set in environment variables.")
+        if not paynow_uen:
+            raise ValueError("PAYNOW_UEN must be set in environment variables.")
+
         amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
         
@@ -414,20 +414,26 @@ def create_paynow_qr():
         expiry_timestamp = int(expiry_time_sgt.timestamp() * 1000)
 
         maybank_url = "https://sslsecure.maybank.com.sg/scripts/mbb_qrcode/mbb_qrcode.jsp"
-        expiry_date_for_api = (datetime.now(sgt_timezone) + timedelta(days=1)).strftime('%Y%m%d')
+        
+        numeric_ref = str(int(order_id.replace('-', '')[:15], 16))[-8:]
 
         params = {
             'proxyValue': paynow_uen,
             'proxyType': 'UEN',
-            'merchantName': company_name,
+            'merchantName': 'NA',
             'amount': amount,
-            'reference': order_id,
+            'reference': numeric_ref,
             'amountInd': 'N',
-            'expiryDate': expiry_date_for_api,
+            'expiryDate': '',
             'rnd': random.random()
         }
         
-        headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://sslsecure.maybank.com.sg/'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
+            'Referer': 'https://sslsecure.maybank.com.sg/cgi-bin/mbs/scripts/mbb_cas/mbb_cas_qrcodegen_mbs.jsp'
+        }
+        
+        logging.info(f"Requesting Maybank QR with params: {params}")
         response = requests.get(maybank_url, params=params, headers=headers, timeout=20, verify=True)
         response.raise_for_status()
 
@@ -440,8 +446,14 @@ def create_paynow_qr():
                 'message': 'QR code generated successfully.'
             })
         
+        logging.error(f"Maybank API returned non-image content. Status: {response.status_code}, Content: {response.text[:200]}")
         return jsonify({'error': 'Invalid response from QR service.'}), 502
+
+    except requests.exceptions.RequestException as e:
+        logging.error(f"HTTP Request to Maybank failed: {e}")
+        return jsonify({"error": "Could not connect to the QR code generation service."}), 504
     except Exception as e:
+        logging.error(f"An unexpected error occurred during QR generation: {e}")
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
