@@ -443,6 +443,7 @@ def create_paynow_qr():
             return jsonify({
                 'qr_code_data': qr_code_data_uri, 
                 'expiry_timestamp': expiry_timestamp,
+                'reference_id': numeric_ref,
                 'message': 'QR code generated successfully.'
             })
         
