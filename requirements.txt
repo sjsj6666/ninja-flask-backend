@@ -6,3 +6,4 @@ certifi
 pycountry
 gunicorn
 pytz
+python-dotenv
