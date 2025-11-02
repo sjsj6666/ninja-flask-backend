@@ -9,12 +9,10 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 import logging
 from datetime import datetime, timedelta, timezone
-from collections import deque
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Main Credentials ---
 IMAP_SERVER = os.environ.get("IMAP_SERVER")
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")
@@ -23,15 +21,13 @@ SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 BANK_EMAIL_SENDER = os.environ.get("BANK_EMAIL_SENDER")
 CHECK_INTERVAL_SECONDS = 15
 
-# --- Alerting Credentials ---
 SMTP_SERVER = os.environ.get("SMTP_SERVER")
 SMTP_PORT = os.environ.get("SMTP_PORT")
 ADMIN_EMAIL_RECEIVER = os.environ.get("ADMIN_EMAIL_RECEIVER")
 ALERT_EMAIL_SENDER = os.environ.get("ALERT_EMAIL_SENDER")
 ALERT_EMAIL_PASSWORD = os.environ.get("ALERT_EMAIL_PASSWORD")
 
-# --- In-memory cache for recent email IDs to prevent duplicates ---
-processed_email_ids = deque(maxlen=100)
+processed_email_ids = []
 
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -102,14 +98,11 @@ def process_emails():
                     if isinstance(response_part, tuple):
                         msg = email.message_from_bytes(response_part[1])
                         message_id_header = msg.get('Message-ID')
-
                         if message_id_header in processed_email_ids:
                             logging.warning(f"Skipping duplicate email with Message-ID: {message_id_header}")
                             continue
-                        
                         processed_email_ids.append(message_id_header)
                         logging.info(f"Processing new email with Message-ID: {message_id_header}")
-                        
                         body = ""
                         if msg.is_multipart():
                             for part in msg.walk():
@@ -150,8 +143,8 @@ def update_order_status(details):
         if len(potential_matches) == 1:
             order_to_update = potential_matches[0]
             order_id = order_to_update['id']
-            logging.info(f"UNIQUE MATCH FOUND! Updating order {order_id} to 'completed'.")
-            supabase.table('orders').update({'status': 'completed'}).eq('id', order_id).execute()
+            logging.info(f"UNIQUE MATCH FOUND! Updating order {order_id} to 'processing'.")
+            supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).execute()
         elif len(potential_matches) > 1:
             logging.critical(f"AMBIGUOUS PAYMENT! Found {len(potential_matches)} orders for S${amount:.2f}.")
             order_ids_to_flag = [order['id'] for order in potential_matches]
@@ -159,6 +152,7 @@ def update_order_status(details):
             send_admin_alert(amount, potential_matches)
         else:
             logging.warning(f"No matching 'verifying' order found for payment details.")
+
     except Exception as e:
         logging.error(f"Error updating order status in Supabase: {e}")
 
