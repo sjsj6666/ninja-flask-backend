@@ -9,6 +9,7 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 import logging
 from datetime import datetime, timedelta, timezone
+from collections import deque
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -28,6 +29,9 @@ SMTP_PORT = os.environ.get("SMTP_PORT")
 ADMIN_EMAIL_RECEIVER = os.environ.get("ADMIN_EMAIL_RECEIVER")
 ALERT_EMAIL_SENDER = os.environ.get("ALERT_EMAIL_SENDER")
 ALERT_EMAIL_PASSWORD = os.environ.get("ALERT_EMAIL_PASSWORD")
+
+# --- In-memory cache for recent email IDs to prevent duplicates ---
+processed_email_ids = deque(maxlen=100)
 
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -65,13 +69,13 @@ def parse_payment_email(email_body):
     try:
         amount_match = re.search(r"S\$([\d,]+\.\d{2})", email_body)
         reference_match = re.search(r"reference (\d+)|Notes(?:\s*\(Optional\))?[:\s]\s*(\w+)", email_body, re.IGNORECASE)
-        from_name_match = re.search(r"From:\s*([A-Z\s]+)", email_body, re.IGNORECASE)
+        from_name_match = re.search(r"From:\s*(.*)", email_body, re.IGNORECASE)
 
         if not amount_match: return None
         amount = float(amount_match.group(1).replace(',', ''))
         reference_id = None
         if reference_match:
-            reference_id = reference_match.group(1) or reference_match.group(2)
+            reference_id = (reference_match.group(1) or reference_match.group(2)).strip()
         
         from_name = from_name_match.group(1).strip() if from_name_match else None
         
@@ -82,7 +86,6 @@ def parse_payment_email(email_body):
     return None
 
 def process_emails():
-    # This function remains the same as before
     try:
         mail = imaplib.IMAP4_SSL(IMAP_SERVER)
         mail.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
@@ -94,18 +97,26 @@ def process_emails():
                 logging.info("No new payment emails found.")
                 return
             for msg_id in message_ids:
-                logging.info(f"Processing new email with ID: {msg_id.decode()}")
                 _, msg_data = mail.fetch(msg_id, "(RFC822)")
                 for response_part in msg_data:
                     if isinstance(response_part, tuple):
                         msg = email.message_from_bytes(response_part[1])
+                        message_id_header = msg.get('Message-ID')
+
+                        if message_id_header in processed_email_ids:
+                            logging.warning(f"Skipping duplicate email with Message-ID: {message_id_header}")
+                            continue
+                        
+                        processed_email_ids.append(message_id_header)
+                        logging.info(f"Processing new email with Message-ID: {message_id_header}")
+                        
                         body = ""
                         if msg.is_multipart():
                             for part in msg.walk():
                                 if part.get_content_type() == "text/plain":
-                                    body = part.get_payload(decode=True).decode()
+                                    body = part.get_payload(decode=True).decode(errors='ignore')
                                     break
-                        else: body = msg.get_payload(decode=True).decode()
+                        else: body = msg.get_payload(decode=True).decode(errors='ignore')
                         payment_details = parse_payment_email(body)
                         if payment_details: update_order_status(payment_details)
         mail.logout()
@@ -121,8 +132,6 @@ def update_order_status(details):
         response = supabase.table('orders').select('id, total_amount, remitter_name').eq('status', 'verifying').gte('created_at', thirty_minutes_ago).execute()
         
         potential_matches = []
-
-        # Tier 1 & 2: Match by Reference ID or (Amount + Name)
         if reference_id:
             for order in response.data:
                 order_numeric_ref = str(int(order['id'].replace('-', '')[:15], 16))[-8:]
@@ -130,16 +139,14 @@ def update_order_status(details):
                     potential_matches.append(order)
         elif from_name:
             for order in response.data:
-                if abs(order['total_amount'] - amount) < 0.01 and order['remitter_name'].lower() in from_name.lower():
+                if abs(order['total_amount'] - amount) < 0.01 and order['remitter_name'] and order['remitter_name'].lower() in from_name.lower():
                     potential_matches.append(order)
         
-        # Tier 3 (Fallback): If no matches yet, try matching by amount only
         if not potential_matches:
             for order in response.data:
                 if abs(order['total_amount'] - amount) < 0.01:
                     potential_matches.append(order)
         
-        # Process the matches
         if len(potential_matches) == 1:
             order_to_update = potential_matches[0]
             order_id = order_to_update['id']
@@ -152,7 +159,6 @@ def update_order_status(details):
             send_admin_alert(amount, potential_matches)
         else:
             logging.warning(f"No matching 'verifying' order found for payment details.")
-
     except Exception as e:
         logging.error(f"Error updating order status in Supabase: {e}")
 
