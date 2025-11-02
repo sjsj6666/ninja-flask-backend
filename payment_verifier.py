@@ -13,7 +13,6 @@ from datetime import datetime, timedelta, timezone
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- Main Credentials ---
 IMAP_SERVER = os.environ.get("IMAP_SERVER")
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")
@@ -22,7 +21,6 @@ SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 BANK_EMAIL_SENDER = os.environ.get("BANK_EMAIL_SENDER")
 CHECK_INTERVAL_SECONDS = 15
 
-# --- Alerting Credentials ---
 SMTP_SERVER = os.environ.get("SMTP_SERVER")
 SMTP_PORT = os.environ.get("SMTP_PORT")
 ADMIN_EMAIL_RECEIVER = os.environ.get("ADMIN_EMAIL_RECEIVER")
@@ -42,17 +40,13 @@ def send_admin_alert(amount, from_name, potential_matches):
     if not all([SMTP_SERVER, SMTP_PORT, ADMIN_EMAIL_RECEIVER, ALERT_EMAIL_SENDER, ALERT_EMAIL_PASSWORD]):
         logging.error("SMTP alert credentials are not fully configured. Cannot send admin alert.")
         return
-    
-    order_details = []
-    for order in potential_matches:
-        order_details.append(f"  - Order ID: {order['id']}, User Name: {order['remitter_name']}")
-
+    order_ids = [order['id'] for order in potential_matches]
     msg = EmailMessage()
     msg.set_content(
         f"An ambiguous payment of S${amount:.2f} from '{from_name}' was detected.\n\n"
         f"Multiple orders matched these details, and their statuses have been set to 'manual_review'.\n"
         f"Please log in to your admin panel to resolve this.\n\n"
-        f"Ambiguous Orders:\n" + "\n".join(order_details)
+        f"Ambiguous Orders:\n" + "\n".join(order_ids)
     )
     msg['Subject'] = f"[URGENT] GameVault Manual Payment Review Required"
     msg['From'] = ALERT_EMAIL_SENDER
@@ -70,23 +64,26 @@ def send_admin_alert(amount, from_name, potential_matches):
 def parse_payment_email(email_body):
     try:
         amount_match = re.search(r"S\$([\d,]+\.\d{2})", email_body)
-        from_name_match = re.search(r"From:\s*(.*)", email_body, re.IGNORECASE)
-
-        if not amount_match or not from_name_match:
-            logging.warning("Could not parse amount or sender name from email.")
-            return None
-
-        amount = float(amount_match.group(1).replace(',', ''))
-        from_name = from_name_match.group(1).strip()
+        reference_match = re.search(r"reference (\d+)|Notes(?:\s*\(Optional\))?[:\s]\s*(\w+)", email_body, re.IGNORECASE)
         
-        logging.info(f"Parsed email: Amount=${amount}, From={from_name}")
-        return {"amount": amount, "from_name": from_name}
+        # --- THIS IS THE CORRECTED LINE ---
+        from_name_match = re.search(r"From:\s*([A-Z\s]+)", email_body, re.IGNORECASE)
+
+        if not amount_match: return None
+        amount = float(amount_match.group(1).replace(',', ''))
+        reference_id = None
+        if reference_match:
+            reference_id = (reference_match.group(1) or reference_match.group(2)).strip()
+        
+        from_name = from_name_match.group(1).strip() if from_name_match else None
+        
+        logging.info(f"Parsed email: Amount=${amount}, Reference={reference_id or 'N/A'}, From={from_name or 'N/A'}")
+        return {"amount": amount, "reference_id": reference_id, "from_name": from_name}
     except Exception as e:
         logging.error(f"Error parsing email body: {e}")
     return None
 
 def process_emails():
-    # This function remains the same
     try:
         mail = imaplib.IMAP4_SSL(IMAP_SERVER)
         mail.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
@@ -121,31 +118,40 @@ def process_emails():
 
 def update_order_status(details):
     amount = details["amount"]
+    reference_id = details["reference_id"]
     from_name = details["from_name"]
     try:
         thirty_minutes_ago = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
         response = supabase.table('orders').select('id, total_amount, remitter_name').eq('status', 'verifying').gte('created_at', thirty_minutes_ago).execute()
         
         potential_matches = []
-        if from_name:
+        if reference_id:
             for order in response.data:
-                # Check if amount matches and the stored name is part of the email's 'From' name
+                order_numeric_ref = str(int(order['id'].replace('-', '')[:15], 16))[-8:]
+                if order_numeric_ref == reference_id:
+                    potential_matches.append(order)
+        elif from_name:
+            for order in response.data:
                 if abs(order['total_amount'] - amount) < 0.01 and order['remitter_name'] and order['remitter_name'].lower() in from_name.lower():
+                    potential_matches.append(order)
+        
+        if not potential_matches:
+            for order in response.data:
+                if abs(order['total_amount'] - amount) < 0.01:
                     potential_matches.append(order)
         
         if len(potential_matches) == 1:
             order_to_update = potential_matches[0]
             order_id = order_to_update['id']
-            logging.info(f"UNIQUE MATCH FOUND (Amount + Name)! Updating order {order_id} to 'processing'.")
+            logging.info(f"UNIQUE MATCH FOUND! Updating order {order_id} to 'processing'.")
             supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).execute()
         elif len(potential_matches) > 1:
-            logging.critical(f"AMBIGUOUS PAYMENT! Found {len(potential_matches)} orders for S${amount:.2f} from '{from_name}'.")
+            logging.critical(f"AMBIGUOUS PAYMENT! Found {len(potential_matches)} orders for S${amount:.2f}.")
             order_ids_to_flag = [order['id'] for order in potential_matches]
             supabase.table('orders').update({'status': 'manual_review'}).in_('id', order_ids_to_flag).execute()
             send_admin_alert(amount, from_name, potential_matches)
         else:
-            logging.warning(f"No matching order found for payment from '{from_name}' of S${amount:.2f}. Manual check may be required.")
-
+            logging.warning(f"No matching 'verifying' order found for payment details.")
     except Exception as e:
         logging.error(f"Error updating order status in Supabase: {e}")
 
