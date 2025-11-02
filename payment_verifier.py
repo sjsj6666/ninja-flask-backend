@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# --- Main Credentials ---
 IMAP_SERVER = os.environ.get("IMAP_SERVER")
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")
@@ -21,6 +22,7 @@ SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 BANK_EMAIL_SENDER = os.environ.get("BANK_EMAIL_SENDER")
 CHECK_INTERVAL_SECONDS = 15
 
+# --- Alerting Credentials ---
 SMTP_SERVER = os.environ.get("SMTP_SERVER")
 SMTP_PORT = os.environ.get("SMTP_PORT")
 ADMIN_EMAIL_RECEIVER = os.environ.get("ADMIN_EMAIL_RECEIVER")
@@ -40,13 +42,17 @@ def send_admin_alert(amount, from_name, potential_matches):
     if not all([SMTP_SERVER, SMTP_PORT, ADMIN_EMAIL_RECEIVER, ALERT_EMAIL_SENDER, ALERT_EMAIL_PASSWORD]):
         logging.error("SMTP alert credentials are not fully configured. Cannot send admin alert.")
         return
-    order_ids = [order['id'] for order in potential_matches]
+    
+    order_details = []
+    for order in potential_matches:
+        order_details.append(f"  - Order ID: {order['id']}, User Name: {order['remitter_name']}")
+
     msg = EmailMessage()
     msg.set_content(
         f"An ambiguous payment of S${amount:.2f} from '{from_name}' was detected.\n\n"
         f"Multiple orders matched these details, and their statuses have been set to 'manual_review'.\n"
         f"Please log in to your admin panel to resolve this.\n\n"
-        f"Ambiguous Orders:\n" + "\n".join(order_ids)
+        f"Ambiguous Orders:\n" + "\n".join(order_details)
     )
     msg['Subject'] = f"[URGENT] GameVault Manual Payment Review Required"
     msg['From'] = ALERT_EMAIL_SENDER
@@ -65,8 +71,6 @@ def parse_payment_email(email_body):
     try:
         amount_match = re.search(r"S\$([\d,]+\.\d{2})", email_body)
         reference_match = re.search(r"reference (\d+)|Notes(?:\s*\(Optional\))?[:\s]\s*(\w+)", email_body, re.IGNORECASE)
-        
-        # --- THIS IS THE CORRECTED LINE ---
         from_name_match = re.search(r"From:\s*([A-Z\s]+)", email_body, re.IGNORECASE)
 
         if not amount_match: return None
@@ -84,6 +88,7 @@ def parse_payment_email(email_body):
     return None
 
 def process_emails():
+    # This function remains the same
     try:
         mail = imaplib.IMAP4_SSL(IMAP_SERVER)
         mail.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
@@ -131,9 +136,13 @@ def update_order_status(details):
                 if order_numeric_ref == reference_id:
                     potential_matches.append(order)
         elif from_name:
+            # Prepare clean names for comparison (lowercase and no spaces)
+            clean_from_name = from_name.lower().replace(' ', '')
             for order in response.data:
-                if abs(order['total_amount'] - amount) < 0.01 and order['remitter_name'] and order['remitter_name'].lower() in from_name.lower():
-                    potential_matches.append(order)
+                if abs(order['total_amount'] - amount) < 0.01 and order['remitter_name']:
+                    clean_remitter_name = order['remitter_name'].lower().replace(' ', '')
+                    if clean_remitter_name in clean_from_name:
+                        potential_matches.append(order)
         
         if not potential_matches:
             for order in response.data:
