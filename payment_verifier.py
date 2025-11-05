@@ -122,43 +122,34 @@ def update_order_status(details):
     amount = details["amount"]
     reference_id = details["reference_id"]
     from_name = details["from_name"]
-    
     try:
-        thirty_minutes_ago = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
-        
-        # Priority 1: Match by Reference ID
-        if reference_id:
-            response = supabase.table('orders').select('id, total_amount').eq('status', 'verifying').like('id', f'%{reference_id[-4:]}').gte('created_at', thirty_minutes_ago).execute()
-            exact_match = []
-            for order in response.data:
-                order_numeric_ref = str(int(order['id'].replace('-', '')[:15], 16))[-8:]
-                if order_numeric_ref == reference_id and abs(order['total_amount'] - amount) < 0.01:
-                    exact_match.append(order)
-            
-            if len(exact_match) == 1:
-                order_id = exact_match[0]['id']
-                logging.info(f"UNIQUE MATCH FOUND via Reference ID! Updating order {order_id} to 'processing'.")
-                supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).execute()
-                return
-
-        # Fallback: Match by Amount and Name if Reference ID fails or is missing
-        response = supabase.table('orders').select('id, total_amount, remitter_name').eq('status', 'verifying').eq('total_amount', amount).gte('created_at', thirty_minutes_ago).execute()
+        # UPDATED: Changed timedelta from 30 minutes to 20 minutes for a tighter window.
+        twenty_minutes_ago = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+        response = supabase.table('orders').select('id, total_amount, remitter_name').eq('status', 'verifying').gte('created_at', twenty_minutes_ago).execute()
         
         potential_matches = []
-        if from_name:
+        if reference_id:
+            for order in response.data:
+                order_numeric_ref = str(int(order['id'].replace('-', '')[:15], 16))[-8:]
+                if order_numeric_ref == reference_id:
+                    potential_matches.append(order)
+        elif from_name:
             clean_from_name = from_name.lower().replace(' ', '')
             for order in response.data:
-                if order['remitter_name']:
+                if abs(order['total_amount'] - amount) < 0.01 and order['remitter_name']:
                     clean_remitter_name = order['remitter_name'].lower().replace(' ', '')
-                    if clean_remitter_name in clean_from_name or clean_from_name in clean_remitter_name:
+                    if clean_remitter_name in clean_from_name:
                         potential_matches.append(order)
-
-        if not potential_matches and response.data:
-             potential_matches = response.data
-
+        
+        if not potential_matches:
+            for order in response.data:
+                if abs(order['total_amount'] - amount) < 0.01:
+                    potential_matches.append(order)
+        
         if len(potential_matches) == 1:
-            order_id = potential_matches[0]['id']
-            logging.info(f"UNIQUE MATCH FOUND via Amount/Name! Updating order {order_id} to 'processing'.")
+            order_to_update = potential_matches[0]
+            order_id = order_to_update['id']
+            logging.info(f"UNIQUE MATCH FOUND! Updating order {order_id} to 'processing'.")
             supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).execute()
         elif len(potential_matches) > 1:
             logging.critical(f"AMBIGUOUS PAYMENT! Found {len(potential_matches)} orders for S${amount:.2f}.")
@@ -167,7 +158,6 @@ def update_order_status(details):
             send_admin_alert(amount, from_name, potential_matches)
         else:
             logging.warning(f"No matching 'verifying' order found for payment details.")
-
     except Exception as e:
         logging.error(f"Error updating order status in Supabase: {e}")
 
