@@ -1,8 +1,9 @@
 # requirements.txt
 
-# Core Web Framework
+# Core Web Framework & Server
 Flask==2.3.3
 Flask-CORS==4.0.0
+gunicorn
 
 # Supabase Client
 supabase==2.3.1
