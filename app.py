@@ -1,3 +1,5 @@
+# app.py (Final Version with Enhanced Garena Validation)
+
 import os
 import logging
 import time
@@ -81,6 +83,10 @@ GARENA_ROLES_URL = "https://shop.garena.sg/api/shop/apps/roles"
 GARENA_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-SG,en-GB;q=0.9,en;q=0.8",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
     "Content-Type": "application/json",
     "Origin": "https://shop.garena.sg",
 }
@@ -376,7 +382,7 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "1.0.2"
+        "version": "1.0.3"
     }), 200
 
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
