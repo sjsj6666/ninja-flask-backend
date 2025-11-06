@@ -1,0 +1,17 @@
+{
+    "welcome_message": "NinjaTopUp API Backend is Live!",
+    "user_id_required": "User ID is required.",
+    "amount_order_id_required": "Amount and order_id are required.",
+    "game_not_configured": "Validation not configured for: {game}",
+    "invalid_server": "Invalid server selection.",
+    "api_format_error": "API response format error.",
+    "invalid_id": "Invalid ID.",
+    "invalid_user_id": "Invalid User ID.",
+    "api_error": "API Error ({service})",
+    "validation_not_configured": "Validation not configured for: {game}",
+    "paynow_uen_not_configured": "PAYNOW_UEN must be set in environment variables.",
+    "qr_generated_successfully": "QR code generated successfully.",
+    "invalid_qr_service_response": "Invalid response from QR service.",
+    "qr_service_connection_error": "Could not connect to the QR code generation service.",
+    "qr_generation_error": "QR code generation failed."
+}
