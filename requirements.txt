@@ -3,10 +3,12 @@
 # Core Web Framework & Server
 Flask==2.3.3
 Flask-CORS==4.0.0
-gunicorn
+gunicorn==22.0.0
 
-# Supabase Client
+# Supabase Client (with pinned dependencies to prevent conflicts)
 supabase==2.3.1
+gotrue==2.9.0
+httpx==0.25.2
 
 # HTTP Requests for External APIs
 requests==2.31.0
