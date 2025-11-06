@@ -1,20 +1,18 @@
-# requirements.txt (UPDATED)
-
 # Core Web Framework & Server
 Flask==2.3.3
 Flask-CORS==4.0.0
 gunicorn==22.0.0
 
-# Supabase Client (UPDATED VERSIONS)
+# Supabase Client (compatible versions)
 supabase==2.3.1
-postgrest-py==0.10.8
-gotrue==2.4.2
-realtime==1.1.1
-storage3==0.7.1
+gotrue==2.9.0
+httpx==0.25.2
+postgrest-py==0.10.6
+realtime==1.0.6
+storage3==0.7.7
 
 # HTTP Requests for External APIs
 requests==2.31.0
-httpx==0.24.1
 certifi==2023.7.22
 
 # Utilities
