@@ -1,0 +1,17 @@
+{
+    "welcome_message": "NinjaTopUp API Backend sedang berjalan!",
+    "user_id_required": "ID Pengguna diperlukan.",
+    "amount_order_id_required": "Jumlah dan order_id diperlukan.",
+    "game_not_configured": "Pengesahan tidak dikonfigurasi untuk: {game}",
+    "invalid_server": "Pemilihan pelayan tidak sah.",
+    "api_format_error": "Ralat format respons API.",
+    "invalid_id": "ID tidak sah.",
+    "invalid_user_id": "ID Pengguna tidak sah.",
+    "api_error": "Ralat API ({service})",
+    "validation_not_configured": "Pengesahan tidak dikonfigurasi untuk: {game}",
+    "paynow_uen_not_configured": "PAYNOW_UEN mesti ditetapkan dalam pembolehubah persekitaran.",
+    "qr_generated_successfully": "Kod QR berjaya dijana.",
+    "invalid_qr_service_response": "Respons perkhidmatan kod QR tidak sah.",
+    "qr_service_connection_error": "Tidak dapat menyambung ke perkhidmatan penjanaan kod QR.",
+    "qr_generation_error": "Penjanaan kod QR gagal."
+}
