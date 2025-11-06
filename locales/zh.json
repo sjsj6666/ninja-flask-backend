@@ -1,0 +1,17 @@
+{
+    "welcome_message": "NinjaTopUp API 后端运行中！",
+    "user_id_required": "用户ID是必需的。",
+    "amount_order_id_required": "金额和订单ID是必需的。",
+    "game_not_configured": "未配置验证：{game}",
+    "invalid_server": "服务器选择无效。",
+    "api_format_error": "API响应格式错误。",
+    "invalid_id": "ID无效。",
+    "invalid_user_id": "用户ID无效。",
+    "api_error": "API错误（{service}）",
+    "validation_not_configured": "未配置验证：{game}",
+    "paynow_uen_not_configured": "必须在环境变量中设置PAYNOW_UEN。",
+    "qr_generated_successfully": "二维码生成成功。",
+    "invalid_qr_service_response": "二维码服务响应无效。",
+    "qr_service_connection_error": "无法连接到二维码生成服务。",
+    "qr_generation_error": "二维码生成失败。"
+}
