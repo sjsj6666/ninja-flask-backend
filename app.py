@@ -1,5 +1,3 @@
-# app.py (Updated with Garena Delta Force Validation)
-
 import os
 import logging
 import time
@@ -18,14 +16,12 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 import random
 
-# Import your new modules
 from error_handler import error_handler, log_execution_time, AppError, ValidationError, ExternalAPIError, PaymentError
 from redis_cache import cached, invalidate_cache
 from i18n import i18n, gettext
 
 app = Flask(__name__)
 
-# --- Configuration ---
 app.config['JSON_AS_ASCII'] = False
 
 allowed_origins = [
@@ -37,7 +33,6 @@ CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=
 
 port = int(os.environ.get("PORT", 10000))
 
-# --- Service Initialization ---
 try:
     SUPABASE_URL = os.environ.get('SUPABASE_URL')
     SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
@@ -50,7 +45,6 @@ except Exception as e:
 
 BASE_URL = "https://www.gameuniverse.co"
 
-# --- API Headers and Constants ---
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -82,26 +76,21 @@ GAMINGNP_HEADERS = {
     "Origin": "https://gaming.com.np",
     "X-Requested-With": "XMLHttpRequest"
 }
-# NEW: Garena API Constants
-GARENA_VALIDATE_URL = "https://shop.garena.sg/api/auth/player_id_login"
+GARENA_LOGIN_URL = "https://shop.garena.sg/api/auth/player_id_login"
+GARENA_ROLES_URL = "https://shop.garena.sg/api/shop/apps/roles"
 GARENA_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
     "Origin": "https://shop.garena.sg",
-    "Referer": "https://shop.garena.sg/"
 }
 
-
-# --- Flask Hooks ---
 @app.before_request
 def before_request():
     g.language = i18n.get_user_language()
     g.request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())
 
-
-# --- Business Logic / Helper Functions ---
-@cached(key_pattern="game_servers::ragnarok_origin", expire_seconds=86400) # Cache for 1 day
+@cached(key_pattern="game_servers::ragnarok_origin", expire_seconds=86400)
 def get_ro_origin_servers():
     logging.info("Returning hardcoded RO Origin server list.")
     servers_list = [
@@ -137,7 +126,6 @@ def perform_ml_check(user_id, zone_id):
         logging.warning("Primary ML API failed. Proceeding to fallback.")
     except Exception:
         logging.error("Primary ML API exception. Proceeding to fallback.")
-    
     fallback_result = check_smile_one_api("mobilelegends", user_id, zone_id)
     if fallback_result.get("status") == "success": fallback_result['region'] = 'N/A'
     return fallback_result
@@ -151,14 +139,11 @@ def check_smile_one_api(game_code, uid, server_id=None):
         "magicchessgogo": "https://www.smile.one/br/merchant/game/checkrole?product=magicchessgogo"
     }
     pids = {"mobilelegends": "25", "bloodstrike": "20294"}
-    
     if game_code not in endpoints: 
         raise ValidationError(gettext("game_not_configured", game=game_code))
-    
     pid_to_use = pids.get(game_code)
     sid_to_use = server_id
     params = {"checkrole": "1"}
-    
     if game_code == "loveanddeepspace":
         pid_to_use = "18762"
         server_sid_map = {"Asia": "81", "America": "82", "Europe": "83"}
@@ -178,7 +163,6 @@ def check_smile_one_api(game_code, uid, server_id=None):
         params.update({"uid": uid, "sid": server_id})
     else:
         params.update({"uid": uid, "sid": sid_to_use, "pid": pid_to_use})
-    
     try:
         response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
         data = {}
@@ -193,15 +177,12 @@ def check_smile_one_api(game_code, uid, server_id=None):
                 raise ExternalAPIError(gettext("api_format_error"), "SmileOne")
         else:
             data = response.json()
-        
         if data.get("code") == 200:
             username = data.get("username") or data.get("nickname")
             if username: return {"status": "success", "username": username.strip()}
-        
         error_message = data.get("message", data.get("info", gettext("invalid_id")))
         if "não existe" in str(error_message): error_message = gettext("invalid_user_id")
         raise ValidationError(error_message)
-        
     except requests.exceptions.RequestException as e:
         logging.error(f"SmileOne API exception for {game_code}: {e}")
         raise ExternalAPIError(gettext("api_error", service=game_code), "SmileOne")
@@ -227,11 +208,9 @@ def check_gamingnp_api(game_code, uid):
     }
     if game_code not in game_params:
         raise ValidationError(gettext("game_not_configured", game=game_code))
-    
     payload = { "userid": uid, "game": game_code, "categoryId": game_params[game_code]["categoryId"] }
     headers = GAMINGNP_HEADERS.copy()
     headers["Referer"] = game_params[game_code]["referer"]
-    
     try:
         response = requests.post(GAMINGNP_VALIDATE_URL, data=payload, headers=headers, timeout=10, verify=certifi.where())
         data = response.json()
@@ -279,12 +258,10 @@ def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server
     razer_server_id = server_id_map.get(server_name)
     if not razer_server_id:
         raise ValidationError(gettext("invalid_server"))
-    
     url = f"{RAZER_BASE_URL}/{api_path}/users/{uid}"
     params = {"serverId": razer_server_id}
     current_headers = RAZER_HEADERS.copy()
     current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{referer_slug}"
-    
     try:
         response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
         data = response.json()
@@ -360,34 +337,34 @@ def check_ro_origin_razer_api(uid, server_id):
         logging.error(f"Razer RO Origin API Error: {e}")
         raise ExternalAPIError(gettext("api_error", service="Ragnarok Origin"), "Razer")
 
-# NEW: Garena Delta Force validation function
 @log_execution_time("check_garena_api")
 def check_garena_api(app_id, uid):
-    payload = {
-        "app_id": app_id,
-        "login_id": uid
-    }
-    try:
-        response = requests.post(GARENA_VALIDATE_URL, json=payload, headers=GARENA_HEADERS, timeout=10)
-        response.raise_for_status() # Will raise an exception for 4xx/5xx status codes
-        data = response.json()
-        
-        # Garena's API is a bit inconsistent. Sometimes it's 'nickname', sometimes 'username'.
-        username = data.get("nickname") or data.get("username")
-        
-        if username:
-            return {"status": "success", "username": username.strip()}
-        else:
-            # Check for a specific error message if available
-            error_msg = data.get("error_msg", gettext("invalid_player_id"))
-            raise ValidationError(error_msg)
-            
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Garena API exception for app_id {app_id}: {e}")
-        raise ExternalAPIError(gettext("api_error", service="Garena"), "Garena")
-
-
-# --- API Routes ---
+    with requests.Session() as s:
+        s.headers.update(GARENA_HEADERS)
+        login_payload = {"app_id": str(app_id), "login_id": uid}
+        try:
+            s.headers["Referer"] = f"https://shop.garena.sg/?app={app_id}"
+            login_response = s.post(GARENA_LOGIN_URL, json=login_payload, timeout=10)
+            login_response.raise_for_status()
+            roles_params = {'app_id': app_id, 'region': 'SG', 'language': 'en', 'source': 'pc'}
+            roles_response = s.get(GARENA_ROLES_URL, params=roles_params, timeout=10)
+            roles_response.raise_for_status()
+            roles_data = roles_response.json()
+            app_roles = roles_data.get(str(app_id))
+            if app_roles and isinstance(app_roles, list) and len(app_roles) > 0:
+                username = app_roles[0].get("role")
+                if username:
+                    return {"status": "success", "username": username.strip()}
+            raise ValidationError(gettext("invalid_player_id"))
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 404:
+                raise ValidationError(gettext("invalid_player_id"))
+            else:
+                logging.error(f"Garena API HTTP error: {e.response.status_code} - {e.response.text}")
+                raise ExternalAPIError(gettext("api_error", service="Garena"), "Garena")
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Garena API connection exception for app_id {app_id}: {e}")
+            raise ExternalAPIError(gettext("api_error", service="Garena"), "Garena")
 
 @app.route('/')
 def home():
@@ -399,7 +376,7 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "1.0.1" # Incremented version
+        "version": "1.0.2"
     }), 200
 
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
@@ -409,16 +386,10 @@ def health_check():
 def check_game_id(game_slug, uid, server_id):
     if not uid: 
         raise ValidationError(gettext("user_id_required"))
-    
-    if game_slug == "ragnarok-origin":
-        result = check_ro_origin_razer_api(uid, server_id)
-        return jsonify(result), 200
-    
     genshin_servers = {"Asia": "os_asia", "America": "os_usa", "Europe": "os_euro", "TW,HK,MO": "os_cht"}
     hsr_servers = {"Asia": "prod_official_asia", "America": "prod_official_usa", "Europe": "prod_official_eur", "TW/HK/MO": "prod_official_cht"}
     zzz_servers = {"Asia": "prod_gf_jp", "America": "prod_gf_us", "Europe": "prod_gf_eu", "TW/HK/MO": "prod_gf_sg"}
     snowbreak_servers = {"Asia": "225", "SEA": "215", "Americas": "235", "Europe": "245"}
-    
     handlers = {
         "pubg-mobile": lambda: check_gamingnp_api("pubgm", uid),
         "genshin-impact": lambda: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, uid, server_id),
@@ -436,19 +407,18 @@ def check_game_id(game_slug, uid, server_id):
         "marvel-rivals": lambda: check_netease_api("marvelrivals", "11001", uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_api("3402", uid),
         "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(server_id)),
-        # NEW: Added handler for Delta Force
         "delta-force": lambda: check_garena_api("100151", uid),
     }
-    
+    if game_slug == "ragnarok-origin":
+        result = check_ro_origin_razer_api(uid, server_id)
+        return jsonify(result), 200
     handler = handlers.get(game_slug)
     if not handler:
         raise ValidationError(gettext("validation_not_configured", game=game_slug))
-    
     result = handler()
     if result.get("status") == "success" and "roles" in result and len(result["roles"]) == 1:
         result["username"] = result["roles"][0].get("roleName")
         del result["roles"]
-    
     return jsonify(result), 200
 
 @app.route('/ro-origin/get-servers', methods=['GET'])
@@ -466,10 +436,8 @@ def create_paynow_qr():
     data = request.get_json()
     if not data or 'amount' not in data or 'order_id' not in data:
         raise ValidationError(gettext("amount_order_id_required"))
-    
     try:
         expiry_minutes = 15
-        
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -483,27 +451,20 @@ def create_paynow_qr():
                     time.sleep(1)
                 else:
                     logging.error(f"Could not fetch expiry setting after {max_retries} attempts, using default. Error: {e}")
-
         paynow_uen = os.environ.get('PAYNOW_UEN')
         if not paynow_uen:
             raise PaymentError(gettext("paynow_uen_not_configured"))
-
         amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
-        
         sgt_timezone = pytz.timezone('Asia/Singapore')
         expiry_time_sgt = datetime.now(sgt_timezone) + timedelta(minutes=expiry_minutes)
         expiry_timestamp = int(expiry_time_sgt.timestamp() * 1000)
-
         maybank_url = "https://sslsecure.maybank.com.sg/scripts/mbb_qrcode/mbb_qrcode.jsp"
         numeric_ref = str(int(order_id.replace('-', '')[:15], 16))[-8:]
-
         params = { 'proxyValue': paynow_uen, 'proxyType': 'UEN', 'merchantName': 'NA', 'amount': amount, 'reference': numeric_ref, 'amountInd': 'N', 'expiryDate': '', 'rnd': random.random() }
         headers = { 'User-Agent': 'Mozilla/5.0...', 'Referer': 'https://sslsecure.maybank.com.sg/...' }
-        
         response = requests.get(maybank_url, params=params, headers=headers, timeout=20, verify=True)
         response.raise_for_status()
-
         if 'image/png' in response.headers.get('Content-Type', ''):
             encoded_string = base64.b64encode(response.content).decode('utf-8')
             qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
@@ -513,15 +474,11 @@ def create_paynow_qr():
                 'reference_id': numeric_ref,
                 'message': gettext("qr_generated_successfully")
             })
-        
         raise ExternalAPIError(gettext("invalid_qr_service_response"), "MaybankQR")
-        
     except requests.exceptions.RequestException as e:
         raise ExternalAPIError(gettext("qr_service_connection_error"), "MaybankQR")
     except Exception as e:
         raise PaymentError(str(e) or gettext("qr_generation_error"))
 
-
-# --- Main Execution ---
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
