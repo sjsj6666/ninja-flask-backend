@@ -1,4 +1,4 @@
-# app.py (Corrected and Merged)
+# app.py (Updated with Garena Delta Force Validation)
 
 import os
 import logging
@@ -46,8 +46,6 @@ try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 except Exception as e:
     logging.critical(f"Could not initialize Supabase client: {e}")
-    # In a real scenario, you might want to exit or handle this more gracefully
-    # For Render deploys, letting it crash and restart is often the intended behavior.
     exit()
 
 BASE_URL = "https://www.gameuniverse.co"
@@ -83,6 +81,15 @@ GAMINGNP_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
     "Origin": "https://gaming.com.np",
     "X-Requested-With": "XMLHttpRequest"
+}
+# NEW: Garena API Constants
+GARENA_VALIDATE_URL = "https://shop.garena.sg/api/auth/player_id_login"
+GARENA_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
+    "Accept": "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    "Origin": "https://shop.garena.sg",
+    "Referer": "https://shop.garena.sg/"
 }
 
 
@@ -198,8 +205,6 @@ def check_smile_one_api(game_code, uid, server_id=None):
     except requests.exceptions.RequestException as e:
         logging.error(f"SmileOne API exception for {game_code}: {e}")
         raise ExternalAPIError(gettext("api_error", service=game_code), "SmileOne")
-
-# --- ADDED: Implementations for all missing validation functions ---
 
 @log_execution_time("check_bigo_native_api")
 def check_bigo_native_api(uid):
@@ -355,6 +360,33 @@ def check_ro_origin_razer_api(uid, server_id):
         logging.error(f"Razer RO Origin API Error: {e}")
         raise ExternalAPIError(gettext("api_error", service="Ragnarok Origin"), "Razer")
 
+# NEW: Garena Delta Force validation function
+@log_execution_time("check_garena_api")
+def check_garena_api(app_id, uid):
+    payload = {
+        "app_id": app_id,
+        "login_id": uid
+    }
+    try:
+        response = requests.post(GARENA_VALIDATE_URL, json=payload, headers=GARENA_HEADERS, timeout=10)
+        response.raise_for_status() # Will raise an exception for 4xx/5xx status codes
+        data = response.json()
+        
+        # Garena's API is a bit inconsistent. Sometimes it's 'nickname', sometimes 'username'.
+        username = data.get("nickname") or data.get("username")
+        
+        if username:
+            return {"status": "success", "username": username.strip()}
+        else:
+            # Check for a specific error message if available
+            error_msg = data.get("error_msg", gettext("invalid_player_id"))
+            raise ValidationError(error_msg)
+            
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Garena API exception for app_id {app_id}: {e}")
+        raise ExternalAPIError(gettext("api_error", service="Garena"), "Garena")
+
+
 # --- API Routes ---
 
 @app.route('/')
@@ -367,7 +399,7 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
+        "version": "1.0.1" # Incremented version
     }), 200
 
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
@@ -404,6 +436,8 @@ def check_game_id(game_slug, uid, server_id):
         "marvel-rivals": lambda: check_netease_api("marvelrivals", "11001", uid),
         "ragnarok-x-next-generation": lambda: check_nuverse_api("3402", uid),
         "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(server_id)),
+        # NEW: Added handler for Delta Force
+        "delta-force": lambda: check_garena_api("100151", uid),
     }
     
     handler = handlers.get(game_slug)
@@ -436,18 +470,17 @@ def create_paynow_qr():
     try:
         expiry_minutes = 15
         
-        # ADDED: Retry logic for fetching settings from Supabase
         max_retries = 3
         for attempt in range(max_retries):
             try:
                 response = supabase.table('settings').select('value').eq('key', 'qr_code_expiry_minutes').single().execute()
                 if response.data and response.data.get('value'):
                     expiry_minutes = int(response.data['value'])
-                break # Success, exit loop
+                break 
             except Exception as e:
                 logging.warning(f"Attempt {attempt + 1} to fetch expiry setting failed: {e}")
                 if attempt < max_retries - 1:
-                    time.sleep(1) # Wait 1 second before retrying
+                    time.sleep(1)
                 else:
                     logging.error(f"Could not fetch expiry setting after {max_retries} attempts, using default. Error: {e}")
 
