@@ -1,11 +1,14 @@
+# error_handler.py (Updated)
+
 import logging
 import traceback
 from functools import wraps
-from flask import jsonify, request
+from flask import jsonify, request, g
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 import os
 from datetime import datetime
+import uuid # Import uuid
 
 # Initialize Sentry for error monitoring
 if os.environ.get('SENTRY_DSN'):
@@ -15,17 +18,42 @@ if os.environ.get('SENTRY_DSN'):
         traces_sample_rate=1.0
     )
 
+# --- NEW: Custom Filter to add request_id to logs ---
+class RequestIdFilter(logging.Filter):
+    def filter(self, record):
+        # If we are in a request context, use g.request_id
+        if request:
+            record.request_id = getattr(g, 'request_id', 'no-request-id')
+        else:
+            # If not in a request (e.g., startup), provide a default
+            record.request_id = 'startup'
+        return True
+# ---------------------------------------------------
+
 # Configure structured logging
+# NOTE: The format string still includes '%(request_id)s'
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d] - %(request_id)s',
-    handlers=[
-        logging.FileHandler('app.log'),
-        logging.StreamHandler()
-    ]
+    # handlers removed to be added after filter
 )
 
 logger = logging.getLogger(__name__)
+
+# --- Add the filter to all handlers ---
+# This ensures every log message gets processed by our custom filter
+for handler in logging.root.handlers:
+    handler.addFilter(RequestIdFilter())
+
+# Also add handlers if basicConfig didn't add any (can happen in some environments)
+if not logging.root.handlers:
+    stream_handler = logging.StreamHandler()
+    stream_handler.addFilter(RequestIdFilter())
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s - [%(filename)s:%(lineno)d] - %(request_id)s')
+    stream_handler.setFormatter(formatter)
+    logging.root.addHandler(stream_handler)
+# ----------------------------------------
+
 
 class AppError(Exception):
     """Base application error class"""
@@ -55,13 +83,12 @@ class PaymentError(AppError):
 def error_handler(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())
-        extra = {'request_id': request_id}
-        
         try:
             return f(*args, **kwargs)
         except AppError as e:
-            logger.warning(f"Application error: {e.message}", extra=extra, exc_info=True)
+            # Note: Now using g.request_id which is set by @app.before_request
+            request_id = getattr(g, 'request_id', 'unknown')
+            logger.warning(f"Application error: {e.message}", exc_info=True)
             return jsonify({
                 'status': 'error',
                 'message': e.message,
@@ -70,7 +97,8 @@ def error_handler(f):
                 'request_id': request_id
             }), e.status_code
         except Exception as e:
-            logger.error(f"Unexpected error: {str(e)}", extra=extra, exc_info=True)
+            request_id = getattr(g, 'request_id', 'unknown')
+            logger.error(f"Unexpected error: {str(e)}", exc_info=True)
             sentry_sdk.capture_exception(e)
             return jsonify({
                 'status': 'error',
@@ -85,20 +113,18 @@ def log_execution_time(operation_name):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             start_time = datetime.now()
-            request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())
-            extra = {'request_id': request_id, 'operation': operation_name}
+            # Note: Using g.request_id here as well for consistency
+            extra = {'request_id': getattr(g, 'request_id', 'unknown'), 'operation': operation_name}
             
             logger.info(f"Starting {operation_name}", extra=extra)
             
             try:
                 result = f(*args, **kwargs)
                 execution_time = (datetime.now() - start_time).total_seconds()
-                
                 logger.info(
                     f"Completed {operation_name} in {execution_time:.2f}s", 
                     extra={**extra, 'execution_time': execution_time}
                 )
-                
                 return result
             except Exception as e:
                 execution_time = (datetime.now() - start_time).total_seconds()
