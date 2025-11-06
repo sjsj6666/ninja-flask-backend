@@ -1,4 +1,4 @@
-# app.py
+# app.py (Corrected and Merged)
 
 import os
 import logging
@@ -18,7 +18,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 import random
 
-# Import the new modules
+# Import your new modules
 from error_handler import error_handler, log_execution_time, AppError, ValidationError, ExternalAPIError, PaymentError
 from redis_cache import cached, invalidate_cache
 from i18n import i18n, gettext
@@ -46,6 +46,8 @@ try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 except Exception as e:
     logging.critical(f"Could not initialize Supabase client: {e}")
+    # In a real scenario, you might want to exit or handle this more gracefully
+    # For Render deploys, letting it crash and restart is often the intended behavior.
     exit()
 
 BASE_URL = "https://www.gameuniverse.co"
@@ -197,13 +199,161 @@ def check_smile_one_api(game_code, uid, server_id=None):
         logging.error(f"SmileOne API exception for {game_code}: {e}")
         raise ExternalAPIError(gettext("api_error", service=game_code), "SmileOne")
 
-# Add @log_execution_time to your other external API functions as well...
-# (Example for bigo)
+# --- ADDED: Implementations for all missing validation functions ---
+
 @log_execution_time("check_bigo_native_api")
 def check_bigo_native_api(uid):
-    # ... function body ...
-    pass # Add the rest of the function bodies here
+    params = {"isFromApp": "0", "bigoId": uid}
+    try:
+        response = requests.get(BIGO_NATIVE_VALIDATE_URL, params=params, headers=BIGO_NATIVE_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("result") == 0 and data.get("data", {}).get("nick_name"):
+            return {"status": "success", "username": data["data"]["nick_name"].strip()}
+        raise ValidationError(data.get("errorMsg", gettext("invalid_bigo_id")))
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Bigo API exception: {e}")
+        raise ExternalAPIError(gettext("api_error", service="Bigo"), "Bigo")
 
+@log_execution_time("check_gamingnp_api")
+def check_gamingnp_api(game_code, uid):
+    game_params = {
+        "hok": {"categoryId": "3898", "referer": "https://gaming.com.np/topup/honor-of-kings"},
+        "pubgm": {"categoryId": "3920", "referer": "https://gaming.com.np/topup/pubg-mobile-global"}
+    }
+    if game_code not in game_params:
+        raise ValidationError(gettext("game_not_configured", game=game_code))
+    
+    payload = { "userid": uid, "game": game_code, "categoryId": game_params[game_code]["categoryId"] }
+    headers = GAMINGNP_HEADERS.copy()
+    headers["Referer"] = game_params[game_code]["referer"]
+    
+    try:
+        response = requests.post(GAMINGNP_VALIDATE_URL, data=payload, headers=headers, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("success") and data.get("detail", {}).get("valid") == "valid":
+            username = data["detail"].get("name")
+            if username: return {"status": "success", "username": username.strip()}
+        raise ValidationError(gettext("invalid_player_id"))
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Gaming.com.np API Error for {game_code}: {e}")
+        raise ExternalAPIError(gettext("api_error", service="Gaming.com.np"), "Gaming.com.np")
+
+@log_execution_time("check_spacegaming_api")
+def check_spacegaming_api(game_id, uid):
+    payload = {"username": uid, "game_id": game_id}
+    try:
+        response = requests.post(SPACEGAMING_VALIDATE_URL, json=payload, headers=SPACEGAMING_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("status") == "true" and data.get("message"):
+            return {"status": "success", "username": data["message"].strip()}
+        raise ValidationError(gettext("invalid_player_id"))
+    except requests.exceptions.RequestException as e:
+        logging.error(f"SpaceGaming API exception: {e}")
+        raise ExternalAPIError(gettext("api_error", service="SpaceGaming"), "SpaceGaming")
+
+@log_execution_time("check_netease_api")
+def check_netease_api(game_path, server_id, role_id):
+    if not server_id:
+        raise ValidationError(gettext("server_required"))
+    params = { "deviceid": "156032181698579111", "traceid": str(uuid.uuid4()), "timestamp": int(time.time() * 1000), "gc_client_version": "1.11.4", "roleid": role_id, "client_type": "gameclub" }
+    current_headers = NETEASE_HEADERS.copy()
+    current_headers['X-TASK-ID'] = f"transid={params['traceid']},uni_transaction_id=default"
+    try:
+        response = requests.get(f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role", params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == "0000":
+            username = data.get("data", {}).get("rolename")
+            if username: return {"status": "success", "username": username.strip()}
+        raise ValidationError(gettext("invalid_id_or_server"))
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Netease API exception: {e}")
+        raise ExternalAPIError(gettext("api_error", service="Netease"), "Netease")
+
+@log_execution_time("check_razer_hoyoverse_api")
+def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server_name):
+    razer_server_id = server_id_map.get(server_name)
+    if not razer_server_id:
+        raise ValidationError(gettext("invalid_server"))
+    
+    url = f"{RAZER_BASE_URL}/{api_path}/users/{uid}"
+    params = {"serverId": razer_server_id}
+    current_headers = RAZER_HEADERS.copy()
+    current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{referer_slug}"
+    
+    try:
+        response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        data = response.json()
+        if response.status_code == 200 and data.get("username"):
+            return {"status": "success", "username": data["username"].strip()}
+        raise ValidationError(data.get("message", gettext("invalid_id_or_server")))
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Razer Hoyoverse API Error for {api_path}: {e}")
+        raise ExternalAPIError(gettext("api_error", service="Razer"), "Razer")
+
+@log_execution_time("check_razer_api")
+def check_razer_api(game_path, uid, server_id):
+    if not server_id:
+        raise ValidationError(gettext("server_required"))
+    params = {"serverId": server_id}
+    current_headers = RAZER_HEADERS.copy()
+    current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{game_path.split('/')[-1]}"
+    try:
+        response = requests.get(f"{RAZER_BASE_URL}/{game_path}/users/{uid}", params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        data = response.json()
+        if response.status_code == 200 and data.get("username"):
+            return {"status": "success", "username": data["username"].strip()}
+        raise ValidationError(data.get("message", gettext("invalid_id_or_server")))
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Razer API exception: {e}")
+        raise ExternalAPIError(gettext("api_error", service="Razer"), "Razer")
+
+@log_execution_time("check_nuverse_api")
+def check_nuverse_api(aid, role_id):
+    params = {"tab": "purchase", "aid": aid, "role_id": role_id}
+    try:
+        response = requests.get(NUVERSE_VALIDATE_URL, params=params, headers=NUVERSE_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 0 and data.get("message", "").lower() == "success":
+            role_info = data.get("data", [{}])[0]
+            username = role_info.get("role_name")
+            server_name = role_info.get("server_name")
+            if username and server_name: return {"status": "success", "username": f"{username} ({server_name})"}
+        raise ValidationError(gettext("invalid_player_id"))
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Nuverse API exception: {e}")
+        raise ExternalAPIError(gettext("api_error", service="Nuverse"), "Nuverse")
+
+@log_execution_time("check_rom_xd_api")
+def check_rom_xd_api(role_id):
+    params = {"source": "webpay", "appId": "2079001", "serverId": "50001", "roleId": role_id}
+    try:
+        response = requests.get(ROM_XD_VALIDATE_URL, params=params, headers=ROM_XD_HEADERS, timeout=10, verify=certifi.where())
+        data = response.json()
+        if data.get("code") == 200:
+            username = data.get("data", {}).get("name")
+            if username: return {"status": "success", "username": username.strip()}
+        raise ValidationError(data.get("msg", gettext("invalid_player_id")))
+    except requests.exceptions.RequestException as e:
+        logging.error(f"ROM XD API exception: {e}")
+        raise ExternalAPIError(gettext("api_error", service="ROM XD"), "ROM XD")
+        
+@log_execution_time("check_ro_origin_razer_api")
+def check_ro_origin_razer_api(uid, server_id):
+    if not server_id:
+        raise ValidationError(gettext("server_required"))
+    url = f"{RAZER_RO_ORIGIN_VALIDATE_URL}/{uid}"
+    params = {"serverId": server_id}
+    try:
+        response = requests.get(url, params=params, headers=RAZER_RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where())
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("roles") and isinstance(data["roles"], list):
+                transformed_roles = [{"roleId": r.get("CharacterId"), "roleName": r.get("Name")} for r in data["roles"]]
+                return {"status": "success", "roles": transformed_roles}
+        raise ValidationError(gettext("invalid_code_or_server"))
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Razer RO Origin API Error: {e}")
+        raise ExternalAPIError(gettext("api_error", service="Ragnarok Origin"), "Razer")
 
 # --- API Routes ---
 
@@ -285,12 +435,21 @@ def create_paynow_qr():
     
     try:
         expiry_minutes = 15
-        try:
-            response = supabase.table('settings').select('value').eq('key', 'qr_code_expiry_minutes').single().execute()
-            if response.data and response.data.get('value'):
-                expiry_minutes = int(response.data['value'])
-        except Exception as e:
-            logging.error(f"Could not fetch expiry setting, using default. Error: {e}")
+        
+        # ADDED: Retry logic for fetching settings from Supabase
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = supabase.table('settings').select('value').eq('key', 'qr_code_expiry_minutes').single().execute()
+                if response.data and response.data.get('value'):
+                    expiry_minutes = int(response.data['value'])
+                break # Success, exit loop
+            except Exception as e:
+                logging.warning(f"Attempt {attempt + 1} to fetch expiry setting failed: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(1) # Wait 1 second before retrying
+                else:
+                    logging.error(f"Could not fetch expiry setting after {max_retries} attempts, using default. Error: {e}")
 
         paynow_uen = os.environ.get('PAYNOW_UEN')
         if not paynow_uen:
