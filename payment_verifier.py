@@ -11,12 +11,12 @@ from supabase import create_client, Client
 from dotenv import load_dotenv
 import logging
 from datetime import datetime, timedelta, timezone
-from itertools import permutations # <-- IMPORT THIS
+from itertools import permutations
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# --- (All your other environment variables and Supabase connection remain the same) ---
+# --- Environment Variables ---
 IMAP_SERVER = os.environ.get("IMAP_SERVER")
 EMAIL_ADDRESS = os.environ.get("EMAIL_ADDRESS")
 EMAIL_PASSWORD = os.environ.get("EMAIL_PASSWORD")
@@ -29,22 +29,20 @@ SMTP_PORT = os.environ.get("SMTP_PORT")
 ADMIN_EMAIL_RECEIVER = os.environ.get("ADMIN_EMAIL_RECEIVER")
 ALERT_EMAIL_SENDER = os.environ.get("ALERT_EMAIL_SENDER")
 ALERT_EMAIL_PASSWORD = os.environ.get("ALERT_EMAIL_PASSWORD")
-processed_email_ids = []
+
 try:
     supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
     logging.info("Successfully connected to Supabase.")
 except Exception as e:
     logging.critical(f"FATAL: Could not connect to Supabase. {e}")
     exit()
-# --- (send_admin_alert and parse_payment_email functions remain the same) ---
+
 def send_admin_alert(amount, from_name, potential_matches):
     if not all([SMTP_SERVER, SMTP_PORT, ADMIN_EMAIL_RECEIVER, ALERT_EMAIL_SENDER, ALERT_EMAIL_PASSWORD]):
         logging.error("SMTP alert credentials are not fully configured. Cannot send admin alert.")
         return
     
-    order_details = []
-    for order in potential_matches:
-        order_details.append(f"  - Order ID: {order['id']}, User Name: {order['remitter_name']}")
+    order_details = [f"  - Order ID: {order['id']}, User Name: {order['remitter_name']}" for order in potential_matches]
 
     msg = EmailMessage()
     msg.set_content(
@@ -57,12 +55,11 @@ def send_admin_alert(amount, from_name, potential_matches):
     msg['From'] = ALERT_EMAIL_SENDER
     msg['To'] = ADMIN_EMAIL_RECEIVER
     try:
-        server = smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT))
-        server.starttls()
-        server.login(ALERT_EMAIL_SENDER, ALERT_EMAIL_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        logging.info(f"Successfully sent manual review alert to {ADMIN_EMAIL_RECEIVER}")
+        with smtplib.SMTP(SMTP_SERVER, int(SMTP_PORT)) as server:
+            server.starttls()
+            server.login(ALERT_EMAIL_SENDER, ALERT_EMAIL_PASSWORD)
+            server.send_message(msg)
+            logging.info(f"Successfully sent manual review alert to {ADMIN_EMAIL_RECEIVER}")
     except Exception as e:
         logging.error(f"Failed to send admin alert email: {e}")
 
@@ -87,79 +84,104 @@ def parse_payment_email(email_body):
     return None
 
 def names_are_equivalent(bank_name, user_name):
-    """
-    Compares two names with advanced logic. Returns True if they are likely the same.
-    - Insensitive to case and extra spacing.
-    - Insensitive to the order of words.
-    - Preserves the integrity of words (e.g., 'ton' does not match 'not').
-    """
     if not bank_name or not user_name:
         return False
-
-    # Normalize both names by making them lowercase
     norm_bank_name = bank_name.lower()
     norm_user_name = user_name.lower()
-
-    # Split the bank name into words
     bank_words = norm_bank_name.split()
-
-    # Remove all spaces from the user's name to handle inputs like "tonshengjun"
     user_name_no_spaces = norm_user_name.replace(" ", "")
-
-    # Generate all possible orderings of the bank name's words
-    possible_combinations = set()
-    for p in permutations(bank_words):
-        possible_combinations.add("".join(p))
-    
-    # Check if the user's name (with no spaces) is one of the valid combinations
+    possible_combinations = {"".join(p) for p in permutations(bank_words)}
     return user_name_no_spaces in possible_combinations
 
-# --- (The process_emails function remains the same) ---
 def process_emails():
     try:
         mail = imaplib.IMAP4_SSL(IMAP_SERVER)
         mail.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
         mail.select("inbox")
         status, messages = mail.search(None, f'(UNSEEN FROM "{BANK_EMAIL_SENDER}")')
-        if status == "OK":
-            message_ids = messages[0].split()
-            if not message_ids:
-                logging.info("No new payment emails found.")
-                return
-            for msg_id in message_ids:
-                _, msg_data = mail.fetch(msg_id, "(RFC822)")
-                for response_part in msg_data:
-                    if isinstance(response_part, tuple):
-                        msg = email.message_from_bytes(response_part[1])
-                        message_id_header = msg.get('Message-ID')
-                        if message_id_header in processed_email_ids:
-                            continue
-                        processed_email_ids.append(message_id_header)
-                        body = ""
-                        if msg.is_multipart():
-                            for part in msg.walk():
-                                if part.get_content_type() == "text/plain":
-                                    body = part.get_payload(decode=True).decode(errors='ignore')
-                                    break
-                        else: body = msg.get_payload(decode=True).decode(errors='ignore')
-                        payment_details = parse_payment_email(body)
-                        if payment_details: update_order_status(payment_details)
+        if status != "OK":
+            logging.error("Failed to search for emails.")
+            mail.logout()
+            return
+
+        message_ids = messages[0].split()
+        if not message_ids:
+            logging.info("No new payment emails found.")
+            mail.logout()
+            return
+
+        # Fetch all unique message IDs from the unseen emails
+        message_id_headers = []
+        for msg_id in message_ids:
+            _, msg_data = mail.fetch(msg_id, "(BODY[HEADER.FIELDS (MESSAGE-ID)])")
+            if msg_data[0] and isinstance(msg_data[0], tuple):
+                header_text = msg_data[0][1].decode()
+                match = re.search(r"Message-ID:\s*<([^>]+)>", header_text, re.IGNORECASE)
+                if match:
+                    message_id_headers.append(match.group(1))
+
+        if not message_id_headers:
+            logging.warning("Found unseen emails but could not extract Message-IDs.")
+            mail.logout()
+            return
+            
+        # Check which of these message IDs are already in our database
+        response = supabase.table('processed_emails').select('message_id').in_('message_id', message_id_headers).execute()
+        db_processed_ids = {row['message_id'] for row in response.data}
+        
+        for msg_id in message_ids:
+            _, msg_data = mail.fetch(msg_id, "(RFC822)")
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    msg = email.message_from_bytes(response_part[1])
+                    message_id_header_full = msg.get('Message-ID', '').strip()
+                    
+                    # Extract the core message ID (without <>)
+                    match = re.search(r"<([^>]+)>", message_id_header_full)
+                    message_id = match.group(1) if match else None
+
+                    if not message_id:
+                        logging.warning(f"Could not parse Message-ID from email with UID {msg_id}.")
+                        continue
+                    
+                    # If this ID is already in our database, skip it
+                    if message_id in db_processed_ids:
+                        logging.info(f"Skipping already processed email: {message_id}")
+                        continue
+                    
+                    # Process the email body
+                    body = ""
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            if part.get_content_type() == "text/plain":
+                                body = part.get_payload(decode=True).decode(errors='ignore')
+                                break
+                    else:
+                        body = msg.get_payload(decode=True).decode(errors='ignore')
+                    
+                    payment_details = parse_payment_email(body)
+                    if payment_details:
+                        update_order_status(payment_details)
+                    
+                    # IMPORTANT: Record this email as processed in Supabase
+                    supabase.table('processed_emails').insert({'message_id': message_id}).execute()
+                    logging.info(f"Recorded email {message_id} as processed.")
+        
         mail.logout()
     except Exception as e:
-        logging.error(f"An error occurred while processing emails: {e}")
+        logging.error(f"An error occurred while processing emails: {e}", exc_info=True)
 
-# --- UPDATED FUNCTION ---
 def update_order_status(details):
     amount = details["amount"]
     reference_id = details["reference_id"]
     from_name = details["from_name"]
     
     try:
-        twenty_minutes_ago = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+        thirty_minutes_ago = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
         
-        # Priority 1: Match by Reference ID (most reliable)
+        # Priority 1: Match by Reference ID
         if reference_id:
-            response = supabase.table('orders').select('id, total_amount').eq('status', 'verifying').gte('created_at', twenty_minutes_ago).execute()
+            response = supabase.table('orders').select('id, total_amount').eq('status', 'verifying').gte('created_at', thirty_minutes_ago).execute()
             exact_match = []
             for order in response.data:
                 order_numeric_ref = str(int(order['id'].replace('-', '')[:15], 16))[-8:]
@@ -172,20 +194,17 @@ def update_order_status(details):
                 supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).execute()
                 return
 
-        # Priority 2 (Fallback): Match by Amount and Remitter Name with new logic
-        response = supabase.table('orders').select('id, total_amount, remitter_name').eq('status', 'verifying').eq('total_amount', amount).gte('created_at', twenty_minutes_ago).execute()
+        # Priority 2: Match by Amount and Remitter Name
+        response = supabase.table('orders').select('id, total_amount, remitter_name').eq('status', 'verifying').eq('total_amount', amount).gte('created_at', thirty_minutes_ago).execute()
         
         potential_matches = []
         if from_name and from_name != "N/A":
             logging.info(f"Attempting to match by name. Bank Name: '{from_name}'")
             for order in response.data:
                 user_remitter_name = order.get('remitter_name')
-                if user_remitter_name:
-                    # Use the new, more flexible name comparison function
-                    if names_are_equivalent(from_name, user_remitter_name):
-                        potential_matches.append(order)
+                if user_remitter_name and names_are_equivalent(from_name, user_remitter_name):
+                    potential_matches.append(order)
         
-        # If name matching yields no results, fall back to just matching by amount within the window
         if not potential_matches and response.data:
              potential_matches = response.data
 
@@ -202,10 +221,9 @@ def update_order_status(details):
             logging.warning(f"No matching 'verifying' order found for payment details.")
 
     except Exception as e:
-        logging.error(f"Error updating order status in Supabase: {e}")
+        logging.error(f"Error updating order status in Supabase: {e}", exc_info=True)
 
 
-# --- (The main loop remains the same) ---
 if __name__ == "__main__":
     logging.info("Starting Payment Verification Bot...")
     if not all([IMAP_SERVER, EMAIL_ADDRESS, EMAIL_PASSWORD, SUPABASE_URL, SUPABASE_SERVICE_KEY, BANK_EMAIL_SENDER]):
