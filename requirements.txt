@@ -1,29 +1,17 @@
-# Core Web Framework & Server
-Flask==2.3.3
-Flask-CORS==4.0.0
-gunicorn==22.0.0
-
-# Supabase Client (let pip resolve compatible versions)
-supabase==2.9.0
-
-# HTTP Requests for External APIs
-requests==2.31.0
-certifi==2023.7.22
-
-# Utilities
-pycountry==23.12.11
-python-dotenv==1.0.0
-pytz==2023.3
-
-# Error Monitoring
-sentry-sdk[flask]==1.40.0
-
-# Caching
-redis==5.0.1
-
-# Internationalization (i18n)
-Babel==2.13.0
-
-# Testing Framework
-pytest==7.4.3
-pytest-mock==3.11.1
+# requirements.txt
+Flask
+Flask-Cors
+supabase
+requests
+certifi
+pycountry
+pytz
+gunicorn
+python-dotenv
+blinker
+click
+itsdangerous
+Jinja2
+MarkupSafe
+Werkzeug
+selenium
