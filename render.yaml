@@ -19,4 +19,3 @@ services:
         value: 3.11.6 # Using a stable Python version
     buildpacks:
       - https://github.com/heroku/heroku-buildpack-python
-      - https://github.com/heroku/heroku-buildpack-google-chrome
