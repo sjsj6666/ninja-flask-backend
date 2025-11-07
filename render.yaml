@@ -1,0 +1,22 @@
+# render.yaml
+services:
+  - type: web
+    name: ninja-flask-backend
+    env: python
+    plan: free # Or your desired plan
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    envVars:
+      - key: SUPABASE_URL
+        fromSecret: SUPABASE_URL
+      - key: SUPABASE_SERVICE_KEY
+        fromSecret: SUPABASE_SERVICE_KEY
+      - key: SMILE_ONE_COOKIE
+        fromSecret: SMILE_ONE_COOKIE
+      - key: PAYNOW_UEN
+        fromSecret: PAYNOW_UEN
+      - key: PYTHON_VERSION
+        value: 3.11.6 # Using a stable Python version
+    buildpacks:
+      - https://github.com/heroku/heroku-buildpack-python
+      - https://github.com/heroku/heroku-buildpack-google-chrome
