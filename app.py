@@ -1,3 +1,5 @@
+# app.py
+
 import os
 import logging
 import time
@@ -8,24 +10,41 @@ import requests
 import certifi
 import pycountry
 import pytz
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request, g, Response
 from flask_cors import CORS, cross_origin
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from supabase import create_client, Client
 from datetime import datetime, timedelta
 from urllib.parse import urlencode
 import random
 
+# Import your i18n functions
+from i18n import i18n, gettext as _
+
 app = Flask(__name__)
 
-allowed_origins = [
-    "http://127.0.0.1:5500",
-    "http://localhost:5500",
-    "https://coxx.netlify.app"
-]
+# --- Rate Limiting Setup ---
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=[os.environ.get("RATELIMIT_DEFAULT", "20 per minute")],
+    storage_uri="memory://"
+)
+
+# --- Centralized CORS Configuration ---
+allowed_origins_str = os.environ.get('ALLOWED_ORIGINS', "http://127.0.0.1:5500,http://localhost:5500")
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
 CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 10000))
+
+# --- i18n Integration ---
+@app.before_request
+def before_request():
+    """Set user language for the request."""
+    g.language = i18n.get_user_language()
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
@@ -111,7 +130,7 @@ def check_smile_one_api(game_code, uid, server_id=None):
         "magicchessgogo": "https://www.smile.one/br/merchant/game/checkrole?product=magicchessgogo"
     }
     pids = {"mobilelegends": "25", "bloodstrike": "20294"}
-    if game_code not in endpoints: return {"status": "error", "message": f"Game not configured: {game_code}"}
+    if game_code not in endpoints: return {"status": "error", "message": _("game_not_configured", game=game_code)}
     pid_to_use = pids.get(game_code)
     sid_to_use = server_id
     params = {"checkrole": "1"}
@@ -119,13 +138,13 @@ def check_smile_one_api(game_code, uid, server_id=None):
         pid_to_use = "18762"
         server_sid_map = {"Asia": "81", "America": "82", "Europe": "83"}
         sid_to_use = server_sid_map.get(str(server_id))
-        if not sid_to_use: return {"status": "error", "message": "Invalid server for this game."}
+        if not sid_to_use: return {"status": "error", "message": _("invalid_server")}
         params.update({"uid": uid, "pid": pid_to_use, "sid": sid_to_use})
     elif game_code == "mobilelegends":
-        if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
+        if not pid_to_use: return {"status": "error", "message": _("invalid_server")}
         params.update({"user_id": uid, "zone_id": server_id, "pid": pid_to_use})
     elif game_code == "bloodstrike":
-        if not pid_to_use: return {"status": "error", "message": "Invalid server for this game."}
+        if not pid_to_use: return {"status": "error", "message": _("invalid_server")}
         params.update({"uid": uid, "sid": "-1", "pid": pid_to_use})
     elif game_code == "magicchessgogo":
         params.update({"uid": uid, "sid": server_id})
@@ -143,18 +162,18 @@ def check_smile_one_api(game_code, uid, server_id=None):
                 if start != -1 and end != -1: data = json.loads(json_text[start:end])
                 else: raise ValueError("No JSON object found in HTML response")
             except (json.JSONDecodeError, ValueError):
-                return {"status": "error", "message": "API response format error."}
+                return {"status": "error", "message": _("api_format_error")}
         else:
             data = response.json()
         if data.get("code") == 200:
             username = data.get("username") or data.get("nickname")
             if username: return {"status": "success", "username": username.strip()}
-        error_message = data.get("message", data.get("info", "Invalid ID."))
-        if "não existe" in str(error_message): error_message = "Invalid User ID."
+        error_message = data.get("message", data.get("info", _("invalid_id")))
+        if "não existe" in str(error_message): error_message = _("invalid_user_id")
         return {"status": "error", "message": error_message}
     except Exception as e:
         logging.error(f"SmileOne API exception for {game_code}: {e}")
-        return {"status": "error", "message": f"API Error ({game_code})"}
+        return {"status": "error", "message": _("api_error", service=game_code)}
 
 def check_bigo_native_api(uid):
     params = {"isFromApp": "0", "bigoId": uid}
@@ -165,7 +184,7 @@ def check_bigo_native_api(uid):
         if data.get("result") == 0 and data.get("data", {}).get("nick_name"):
             return {"status": "success", "username": data["data"]["nick_name"].strip()}
         return {"status": "error", "message": data.get("errorMsg", "Invalid Bigo ID.")}
-    except Exception: return {"status": "error", "message": "API Error (Bigo)"}
+    except Exception: return {"status": "error", "message": _("api_error", service="Bigo")}
 
 def check_gamingnp_api(game_code, uid):
     game_params = {
@@ -187,7 +206,7 @@ def check_gamingnp_api(game_code, uid):
         return {"status": "error", "message": "Invalid Player ID."}
     except Exception as e:
         logging.error(f"Gaming.com.np API Error for {game_code}: {e}")
-        return {"status": "error", "message": f"API Error ({game_code})"}
+        return {"status": "error", "message": _("api_error", service=game_code)}
 
 def check_spacegaming_api(game_id, uid):
     payload = {"username": uid, "game_id": game_id}
@@ -198,7 +217,7 @@ def check_spacegaming_api(game_id, uid):
         if data.get("status") == "true" and data.get("message"):
             return {"status": "success", "username": data["message"].strip()}
         return {"status": "error", "message": "Invalid Player ID."}
-    except Exception: return {"status": "error", "message": f"API Error ({game_id})"}
+    except Exception: return {"status": "error", "message": _("api_error", service=game_id)}
 
 def check_netease_api(game_path, server_id, role_id):
     params = { "deviceid": "156032181698579111", "traceid": str(uuid.uuid4()), "timestamp": int(time.time() * 1000), "gc_client_version": "1.11.4", "roleid": role_id, "client_type": "gameclub" }
@@ -212,12 +231,12 @@ def check_netease_api(game_path, server_id, role_id):
             username = data.get("data", {}).get("rolename")
             if username: return {"status": "success", "username": username.strip()}
         return {"status": "error", "message": "Invalid ID or Server."}
-    except Exception: return {"status": "error", "message": "API Error (Netease)"}
+    except Exception: return {"status": "error", "message": _("api_error", service="Netease")}
 
 def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server_name):
     razer_server_id = server_id_map.get(server_name)
     if not razer_server_id:
-        return {"status": "error", "message": "Invalid server selection."}
+        return {"status": "error", "message": _("invalid_server")}
     if api_path == "genshinimpact":
         url = f"https://gold.razer.com/api/ext/{api_path}/users/{uid}"
     else:
@@ -250,7 +269,7 @@ def check_razer_api(game_path, uid, server_id):
             return {"status": "success", "username": data["username"].strip()}
         else:
             return {"status": "error", "message": data.get("message", "Invalid ID or Server.")}
-    except Exception: return {"status": "error", "message": "API Error (Razer)"}
+    except Exception: return {"status": "error", "message": _("api_error", service="Razer")}
 
 def check_nuverse_api(aid, role_id):
     params = {"tab": "purchase", "aid": aid, "role_id": role_id}
@@ -264,7 +283,7 @@ def check_nuverse_api(aid, role_id):
             server_name = role_info.get("server_name")
             if username and server_name: return {"status": "success", "username": f"{username} ({server_name})"}
         return {"status": "error", "message": "Invalid Player ID."}
-    except Exception: return {"status": "error", "message": "API Error (Nuverse)"}
+    except Exception: return {"status": "error", "message": _("api_error", service="Nuverse")}
 
 def check_rom_xd_api(role_id):
     params = {"source": "webpay", "appId": "2079001", "serverId": "50001", "roleId": role_id}
@@ -276,7 +295,7 @@ def check_rom_xd_api(role_id):
             username = data.get("data", {}).get("name")
             if username: return {"status": "success", "username": username.strip()}
         return {"status": "error", "message": data.get("msg", "Invalid Player ID.")}
-    except Exception: return {"status": "error", "message": "API Error (ROM)"}
+    except Exception: return {"status": "error", "message": _("api_error", service="ROM")}
 
 def check_ro_origin_razer_api(uid, server_id):
     url = f"{RAZER_RO_ORIGIN_VALIDATE_URL}/{uid}"
@@ -337,11 +356,11 @@ def check_garena_api(app_id, uid):
             return {"status": "error", "message": "Could not find player name."}
         except requests.exceptions.RequestException as e:
             logging.error(f"Garena API connection exception for app_id {app_id}: {e}")
-            return {"status": "error", "message": "API Error (Garena)"}
+            return {"status": "error", "message": _("api_error", service="Garena")}
 
 @app.route('/')
 def home():
-    return "NinjaTopUp API Backend is Live!"
+    return _("welcome_message")
 
 @app.route('/health')
 def health_check():
@@ -350,8 +369,9 @@ def health_check():
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
 @cross_origin(origins=allowed_origins, supports_credentials=True)
+@limiter.limit("10/minute")
 def check_game_id(game_slug, uid, server_id):
-    if not uid: return jsonify({"status": "error", "message": "User ID is required."}), 400
+    if not uid: return jsonify({"status": "error", "message": _("user_id_required")}), 400
     if game_slug == "ragnarok-origin":
         result = check_ro_origin_razer_api(uid, server_id)
         status_code = 200 if result.get("status") == "success" else 400
@@ -388,7 +408,7 @@ def check_game_id(game_slug, uid, server_id):
             result["username"] = result["roles"][0].get("roleName")
             del result["roles"]
     else:
-        result = {"status": "error", "message": f"Validation not configured for: {game_slug}"}
+        result = {"status": "error", "message": _("validation_not_configured", game=game_slug)}
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
@@ -425,10 +445,11 @@ def generate_sitemap():
 
 @app.route('/create-paynow-qr', methods=['POST'])
 @cross_origin(origins=allowed_origins, supports_credentials=True)
+@limiter.limit("5/minute")
 def create_paynow_qr():
     data = request.get_json()
     if not data or 'amount' not in data or 'order_id' not in data:
-        return jsonify({'error': 'Amount and order_id are required.'}), 400
+        return jsonify({'error': _("amount_order_id_required")}), 400
     try:
         expiry_minutes = 15
         try:
@@ -440,7 +461,7 @@ def create_paynow_qr():
 
         paynow_uen = os.environ.get('PAYNOW_UEN')
         if not paynow_uen:
-            raise ValueError("PAYNOW_UEN must be set in environment variables.")
+            raise ValueError(_("paynow_uen_not_configured"))
 
         amount = f"{float(data['amount']):.2f}"
         order_id = str(data['order_id'])
@@ -481,15 +502,15 @@ def create_paynow_qr():
                 'qr_code_data': qr_code_data_uri, 
                 'expiry_timestamp': expiry_timestamp,
                 'reference_id': numeric_ref,
-                'message': 'QR code generated successfully.'
+                'message': _("qr_generated_successfully")
             })
         
         logging.error(f"Maybank API returned non-image content. Status: {response.status_code}, Content: {response.text[:200]}")
-        return jsonify({'error': 'Invalid response from QR service.'}), 502
+        return jsonify({'error': _("invalid_qr_service_response")}), 502
 
     except requests.exceptions.RequestException as e:
         logging.error(f"HTTP Request to Maybank failed: {e}")
-        return jsonify({"error": "Could not connect to the QR code generation service."}), 504
+        return jsonify({"error": _("qr_service_connection_error")}), 504
     except Exception as e:
         logging.error(f"An unexpected error occurred during QR generation: {e}")
         return jsonify({"error": str(e)}), 500
