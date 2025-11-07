@@ -14,4 +14,4 @@ itsdangerous
 Jinja2
 MarkupSafe
 Werkzeug
-selenium
+Flask-Limiter
