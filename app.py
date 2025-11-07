@@ -88,8 +88,8 @@ def perform_ml_check(user_id, zone_id):
             data = response.json()
             if data.get("status") == "success" and data.get("result", {}).get("nickname"):
                 return {'status': 'success', 'username': data["result"]["nickname"], 'region': 'N/A'}
-    except Exception:
-        pass
+    except Exception as e:
+        logging.error(f"Primary ML check failed: {e}")
     return check_smile_one_api("mobilelegends", user_id, zone_id)
 
 def check_smile_one_api(game_code, uid, server_id=None):
@@ -114,10 +114,11 @@ def check_smile_one_api(game_code, uid, server_id=None):
     try:
         response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10)
         data = response.json()
-        if data.get("code") == 200 and data.get("username"):
-            return {"status": "success", "username": data["username"].strip()}
+        if data.get("code") == 200 and (data.get("username") or data.get("nickname")):
+            return {"status": "success", "username": (data.get("username") or data.get("nickname")).strip()}
         return {"status": "error", "message": data.get("message", "Invalid ID.")}
-    except Exception:
+    except Exception as e:
+        logging.error(f"Smile.One API error for {game_code}: {e}")
         return {"status": "error", "message": "API Error"}
 
 def check_garena_api(app_id, uid):
@@ -149,12 +150,24 @@ def check_garena_api(app_id, uid):
         return {"status": "error", "message": "Invalid Player ID."}
     except Exception as e:
         logging.error(f"Selenium/Garena error: {e}")
-        return {"status": "error", "message": "Validation API failed."}
+        return {"status": "error", "message": "API validation failed."}
     finally:
         if driver:
             driver.quit()
-            
-# (You can paste your other check_* functions here if needed)
+
+def get_ro_origin_servers():
+    return {"status": "success", "servers": [
+        {"server_id": 1, "server_name": "Prontera-(1~3)/Izlude-9(-10)/Morroc-(1~10)"},
+        {"server_id": 4, "server_name": "Prontera-(4~6)/Prontera-10/Izlude-(1~8)"},
+        {"server_id": 7, "server_name": "Prontera-(7~9)/Geffen-(1~10)/Payon-(1~10)"},
+        {"server_id": 51, "server_name": "Poring Island-(1~10)/Orc Village-(1~10)/Shipwreck-(1~9)/Memoria/Awakening/Ant Hell-(1~10)/Goblin Forest-1(-2-4)/Valentine"},
+        {"server_id": 95, "server_name": "Lasagna/1st-Anniversary/Goblin Forest-7/For Honor/Sakura Vows/Goblin Forest-10/Garden-1"},
+        {"server_id": 102, "server_name": "1.5th Anniversary/Vicland"},
+        {"server_id": 104, "server_name": "2025"},
+        {"server_id": 105, "server_name": "Timeless Love"},
+        {"server_id": 106, "server_name": "2nd Anniversary"},
+        {"server_id": 107, "server_name": "Hugel"}
+    ]}
 
 @app.route('/')
 def home():
@@ -175,7 +188,6 @@ def check_game_id(game_slug, uid, server_id):
         "delta-force": lambda: check_garena_api("100151", uid),
         "blood-strike": lambda: check_smile_one_api("bloodstrike", uid),
         "mobile-legends": lambda: perform_ml_check(uid, server_id),
-        # Add other game handlers here
     }
 
     handler = handlers.get(game_slug)
@@ -186,6 +198,11 @@ def check_game_id(game_slug, uid, server_id):
 
     status_code = 200 if result and result.get("status") == "success" else 400
     return jsonify(result), status_code
+
+@app.route('/ro-origin/get-servers', methods=['GET'])
+@cross_origin(origins=allowed_origins, supports_credentials=True)
+def handle_ro_origin_get_servers():
+    return jsonify(get_ro_origin_servers()), 200
 
 @app.route('/create-paynow-qr', methods=['POST'])
 @cross_origin(origins=allowed_origins, supports_credentials=True)
