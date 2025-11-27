@@ -1,4 +1,4 @@
-#payment_verifier.py
+# payment_verifier.py
 
 import os
 import email
@@ -65,12 +65,18 @@ def send_admin_alert(amount, from_name, potential_matches):
 
 def parse_payment_email(email_body):
     try:
-        amount_match = re.search(r"S\$([\d,]+\.\d{2})", email_body)
+        # Regex to find amount (e.g., S$10.00, SGD 10.00)
+        amount_match = re.search(r"(?:S\$|SGD)\s?([\d,]+\.\d{2})", email_body, re.IGNORECASE)
+        
+        # Regex to find reference number
         reference_match = re.search(r"reference (\d+)|Notes(?:\s*\(Optional\))?[:\s]\s*(\w+)", email_body, re.IGNORECASE)
-        from_name_match = re.search(r"From:\s*([A-Za-z\s]+)", email_body, re.IGNORECASE)
+        
+        # Robust Regex to find sender name (Catch "From:", "Transfer from:", "Payer:")
+        from_name_match = re.search(r"(?:From|Transfer from|Payer|Sent by):\s*([A-Za-z\s]+)", email_body, re.IGNORECASE)
 
         if not amount_match: return None
         amount = float(amount_match.group(1).replace(',', ''))
+        
         reference_id = None
         if reference_match:
             reference_id = (reference_match.group(1) or reference_match.group(2)).strip()
@@ -90,6 +96,7 @@ def names_are_equivalent(bank_name, user_name):
     norm_user_name = user_name.lower()
     bank_words = norm_bank_name.split()
     user_name_no_spaces = norm_user_name.replace(" ", "")
+    # Check permutations to handle "David Chen" vs "Chen David"
     possible_combinations = {"".join(p) for p in permutations(bank_words)}
     return user_name_no_spaces in possible_combinations
 
@@ -110,7 +117,7 @@ def process_emails():
             mail.logout()
             return
 
-        # Fetch all unique message IDs from the unseen emails
+        # Fetch message IDs to deduplicate
         message_id_headers = []
         for msg_id in message_ids:
             _, msg_data = mail.fetch(msg_id, "(BODY[HEADER.FIELDS (MESSAGE-ID)])")
@@ -125,7 +132,7 @@ def process_emails():
             mail.logout()
             return
             
-        # Check which of these message IDs are already in our database
+        # Check DB for existing IDs
         response = supabase.table('processed_emails').select('message_id').in_('message_id', message_id_headers).execute()
         db_processed_ids = {row['message_id'] for row in response.data}
         
@@ -136,20 +143,12 @@ def process_emails():
                     msg = email.message_from_bytes(response_part[1])
                     message_id_header_full = msg.get('Message-ID', '').strip()
                     
-                    # Extract the core message ID (without <>)
                     match = re.search(r"<([^>]+)>", message_id_header_full)
                     message_id = match.group(1) if match else None
 
-                    if not message_id:
-                        logging.warning(f"Could not parse Message-ID from email with UID {msg_id}.")
+                    if not message_id or message_id in db_processed_ids:
                         continue
                     
-                    # If this ID is already in our database, skip it
-                    if message_id in db_processed_ids:
-                        logging.info(f"Skipping already processed email: {message_id}")
-                        continue
-                    
-                    # Process the email body
                     body = ""
                     if msg.is_multipart():
                         for part in msg.walk():
@@ -163,7 +162,6 @@ def process_emails():
                     if payment_details:
                         update_order_status(payment_details)
                     
-                    # IMPORTANT: Record this email as processed in Supabase
                     supabase.table('processed_emails').insert({'message_id': message_id}).execute()
                     logging.info(f"Recorded email {message_id} as processed.")
         
@@ -177,11 +175,12 @@ def update_order_status(details):
     from_name = details["from_name"]
     
     try:
-        thirty_minutes_ago = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        # --- CHANGED: Reduced lookback window to 10 minutes (5 min expiry + 5 min buffer) ---
+        time_window_start = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         
-        # Priority 1: Match by Reference ID
+        # 1. Exact Match via Reference ID (Gold standard)
         if reference_id:
-            response = supabase.table('orders').select('id, total_amount').eq('status', 'verifying').gte('created_at', thirty_minutes_ago).execute()
+            response = supabase.table('orders').select('id, total_amount').eq('status', 'verifying').gte('created_at', time_window_start).execute()
             exact_match = []
             for order in response.data:
                 order_numeric_ref = str(int(order['id'].replace('-', '')[:15], 16))[-8:]
@@ -190,44 +189,51 @@ def update_order_status(details):
             
             if len(exact_match) == 1:
                 order_id = exact_match[0]['id']
-                logging.info(f"UNIQUE MATCH FOUND via Reference ID! Updating order {order_id} to 'processing'.")
+                logging.info(f"MATCH FOUND (Reference ID): Order {order_id} -> Processing")
                 supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).execute()
                 return
 
-        # Priority 2: Match by Amount and Remitter Name
-        response = supabase.table('orders').select('id, total_amount, remitter_name').eq('status', 'verifying').eq('total_amount', amount).gte('created_at', thirty_minutes_ago).execute()
+        # 2. Strict Match via Amount AND Name (No fallback to just amount)
+        response = supabase.table('orders').select('id, total_amount, remitter_name').eq('status', 'verifying').eq('total_amount', amount).gte('created_at', time_window_start).execute()
         
         potential_matches = []
+        
         if from_name and from_name != "N/A":
-            logging.info(f"Attempting to match by name. Bank Name: '{from_name}'")
+            logging.info(f"Attempting Strict Match by Name: '{from_name}'")
             for order in response.data:
                 user_remitter_name = order.get('remitter_name')
+                # Strict check: Name MUST match
                 if user_remitter_name and names_are_equivalent(from_name, user_remitter_name):
                     potential_matches.append(order)
-        
-        if not potential_matches and response.data:
-             potential_matches = response.data
+        else:
+            # If we don't have a name from the email (parser failed) AND no Ref ID,
+            # we CANNOT safely auto-approve based on price alone if strict security is required.
+            logging.warning("Sender Name is N/A and no Reference ID. Cannot verify strictly.")
+            # potential_matches remains empty, falling through to 'No matching order' logic below.
 
+        # 3. Decision Logic
         if len(potential_matches) == 1:
             order_id = potential_matches[0]['id']
-            logging.info(f"UNIQUE MATCH FOUND via Amount/Name! Updating order {order_id} to 'processing'.")
+            logging.info(f"STRICT MATCH FOUND (Amount + Name): Order {order_id} -> Processing")
             supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).execute()
+            
         elif len(potential_matches) > 1:
-            logging.critical(f"AMBIGUOUS PAYMENT! Found {len(potential_matches)} orders for S${amount:.2f}.")
+            logging.critical(f"AMBIGUOUS: Found {len(potential_matches)} matches for S${amount:.2f} + Name '{from_name}'.")
             order_ids_to_flag = [order['id'] for order in potential_matches]
             supabase.table('orders').update({'status': 'manual_review'}).in_('id', order_ids_to_flag).execute()
             send_admin_alert(amount, from_name, potential_matches)
+            
         else:
-            logging.warning(f"No matching 'verifying' order found for payment details.")
+            # This catches cases where amount matches but name does not, OR name was N/A
+            logging.warning(f"No strict match found for S${amount:.2f} (Window: 10m). Name check failed or N/A.")
 
     except Exception as e:
-        logging.error(f"Error updating order status in Supabase: {e}", exc_info=True)
-
+        logging.error(f"Error updating order status: {e}", exc_info=True)
 
 if __name__ == "__main__":
     logging.info("Starting Payment Verification Bot...")
     if not all([IMAP_SERVER, EMAIL_ADDRESS, EMAIL_PASSWORD, SUPABASE_URL, SUPABASE_SERVICE_KEY, BANK_EMAIL_SENDER]):
-        logging.critical("FATAL: Core environment variables are missing. Bot cannot start.")
+        logging.critical("FATAL: Core environment variables are missing.")
         exit()
     while True:
         process_emails()
