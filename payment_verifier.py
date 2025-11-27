@@ -65,24 +65,35 @@ def send_admin_alert(amount, from_name, potential_matches):
 
 def parse_payment_email(email_body):
     try:
-        # Regex to find amount (e.g., S$10.00, SGD 10.00)
+        # 1. Extract Amount
         amount_match = re.search(r"(?:S\$|SGD)\s?([\d,]+\.\d{2})", email_body, re.IGNORECASE)
-        
-        # Regex to find reference number
-        reference_match = re.search(r"reference (\d+)|Notes(?:\s*\(Optional\))?[:\s]\s*(\w+)", email_body, re.IGNORECASE)
-        
-        # Robust Regex to find sender name (Catch "From:", "Transfer from:", "Payer:")
-        from_name_match = re.search(r"(?:From|Transfer from|Payer|Sent by):\s*([A-Za-z\s]+)", email_body, re.IGNORECASE)
-
         if not amount_match: return None
         amount = float(amount_match.group(1).replace(',', ''))
         
+        # 2. Extract Reference (Optional)
+        reference_match = re.search(r"reference (\d+)|Notes(?:\s*\(Optional\))?[:\s]\s*(\w+)", email_body, re.IGNORECASE)
         reference_id = None
         if reference_match:
             reference_id = (reference_match.group(1) or reference_match.group(2)).strip()
         
-        from_name = from_name_match.group(1).strip() if from_name_match else "N/A"
+        # 3. Extract Name (Robust)
+        from_name = "N/A"
         
+        # Pattern A: MariBank Style (From: \n NAME \n If this...)
+        # Captures text between "From:" and "If this" across newlines
+        maribank_match = re.search(r"From:[\s\r\n]+([A-Za-z\s]+?)[\s\r\n]+If this", email_body, re.IGNORECASE)
+        
+        # Pattern B: Standard (From: NAME)
+        standard_match = re.search(r"(?:From|Transfer from|Payer|Sent by|Paid by)[\s:]+([A-Za-z\s]+?)(?=\n|\r|$)", email_body, re.IGNORECASE)
+
+        if maribank_match:
+            from_name = maribank_match.group(1).strip()
+        elif standard_match:
+            from_name = standard_match.group(1).strip()
+        
+        # Cleanup name (remove extra newlines if caught)
+        from_name = " ".join(from_name.split())
+
         logging.info(f"Parsed email: Amount=${amount}, Reference={reference_id or 'N/A'}, From={from_name}")
         return {"amount": amount, "reference_id": reference_id, "from_name": from_name}
     except Exception as e:
@@ -90,15 +101,45 @@ def parse_payment_email(email_body):
     return None
 
 def names_are_equivalent(bank_name, user_name):
+    """
+    Checks if two names are equivalent regardless of:
+    1. Case (upper/lower)
+    2. Word order (sequence)
+    3. Spaces (if user combined them)
+    """
     if not bank_name or not user_name:
         return False
-    norm_bank_name = bank_name.lower()
-    norm_user_name = user_name.lower()
-    bank_words = norm_bank_name.split()
-    user_name_no_spaces = norm_user_name.replace(" ", "")
-    # Check permutations to handle "David Chen" vs "Chen David"
-    possible_combinations = {"".join(p) for p in permutations(bank_words)}
-    return user_name_no_spaces in possible_combinations
+    
+    # Normalize strings
+    norm_bank = bank_name.lower().strip()
+    norm_user = user_name.lower().strip()
+    
+    # Direct match
+    if norm_bank == norm_user:
+        return True
+        
+    # Split into words
+    bank_words = norm_bank.split()
+    user_words = norm_user.split()
+    
+    # 1. Check sorted words match (Sequence insensitive)
+    # e.g. "Tan David" == "David Tan"
+    if sorted(bank_words) == sorted(user_words):
+        return True
+        
+    # 2. Check combined match (Space insensitive)
+    # e.g. User: "shengjunton", Bank: "TON SHENG JUN"
+    # We combine bank words into permutations and check if any match the user string
+    user_no_space = norm_user.replace(" ", "")
+    
+    # Generate all orders of bank words: "tonshengjun", "shengjunton", etc.
+    # Note: Only do this if word count is small (<5) to avoid perf issues
+    if len(bank_words) < 5:
+        for p in permutations(bank_words):
+            if "".join(p) == user_no_space:
+                return True
+                
+    return False
 
 def process_emails():
     try:
@@ -175,10 +216,10 @@ def update_order_status(details):
     from_name = details["from_name"]
     
     try:
-        # --- CHANGED: Reduced lookback window to 10 minutes (5 min expiry + 5 min buffer) ---
+        # Window: 10 minutes
         time_window_start = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         
-        # 1. Exact Match via Reference ID (Gold standard)
+        # 1. Exact Match via Reference ID
         if reference_id:
             response = supabase.table('orders').select('id, total_amount').eq('status', 'verifying').gte('created_at', time_window_start).execute()
             exact_match = []
@@ -193,39 +234,39 @@ def update_order_status(details):
                 supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).execute()
                 return
 
-        # 2. Strict Match via Amount AND Name (No fallback to just amount)
+        # 2. Match via Amount
         response = supabase.table('orders').select('id, total_amount, remitter_name').eq('status', 'verifying').eq('total_amount', amount).gte('created_at', time_window_start).execute()
         
         potential_matches = []
         
         if from_name and from_name != "N/A":
+            # Strict Name Match using new robust logic
             logging.info(f"Attempting Strict Match by Name: '{from_name}'")
             for order in response.data:
                 user_remitter_name = order.get('remitter_name')
-                # Strict check: Name MUST match
-                if user_remitter_name and names_are_equivalent(from_name, user_remitter_name):
+                if names_are_equivalent(from_name, user_remitter_name):
                     potential_matches.append(order)
         else:
-            # If we don't have a name from the email (parser failed) AND no Ref ID,
-            # we CANNOT safely auto-approve based on price alone if strict security is required.
-            logging.warning("Sender Name is N/A and no Reference ID. Cannot verify strictly.")
-            # potential_matches remains empty, falling through to 'No matching order' logic below.
+            # Fallback logic: If name parsing failed (N/A) or bank didn't send name
+            logging.warning("Sender Name is N/A. Checking for unique amount match.")
+            if response.data:
+                potential_matches = response.data
 
         # 3. Decision Logic
         if len(potential_matches) == 1:
             order_id = potential_matches[0]['id']
-            logging.info(f"STRICT MATCH FOUND (Amount + Name): Order {order_id} -> Processing")
+            log_type = "Amount + Name" if from_name != "N/A" else "Unique Amount (Name N/A)"
+            logging.info(f"MATCH FOUND ({log_type}): Order {order_id} -> Processing")
             supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).execute()
             
         elif len(potential_matches) > 1:
-            logging.critical(f"AMBIGUOUS: Found {len(potential_matches)} matches for S${amount:.2f} + Name '{from_name}'.")
+            logging.critical(f"AMBIGUOUS: Found {len(potential_matches)} matches for S${amount:.2f}.")
             order_ids_to_flag = [order['id'] for order in potential_matches]
             supabase.table('orders').update({'status': 'manual_review'}).in_('id', order_ids_to_flag).execute()
             send_admin_alert(amount, from_name, potential_matches)
             
         else:
-            # This catches cases where amount matches but name does not, OR name was N/A
-            logging.warning(f"No strict match found for S${amount:.2f} (Window: 10m). Name check failed or N/A.")
+            logging.warning(f"No match found for S${amount:.2f} (Window: 10m).")
 
     except Exception as e:
         logging.error(f"Error updating order status: {e}", exc_info=True)
