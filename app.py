@@ -19,12 +19,10 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 import random
 
-# Import your i18n functions
 from i18n import i18n, gettext as _
 
 app = Flask(__name__)
 
-# --- Rate Limiting Setup ---
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -32,7 +30,6 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-# --- Centralized CORS Configuration ---
 allowed_origins_str = os.environ.get('ALLOWED_ORIGINS', "http://127.0.0.1:5500,http://localhost:5500")
 allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
 CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
@@ -40,10 +37,8 @@ CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 10000))
 
-# --- i18n Integration ---
 @app.before_request
 def before_request():
-    """Set user language for the request."""
     g.language = i18n.get_user_language()
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
@@ -451,7 +446,8 @@ def create_paynow_qr():
     if not data or 'amount' not in data or 'order_id' not in data:
         return jsonify({'error': _("amount_order_id_required")}), 400
     try:
-        expiry_minutes = 15
+        # --- CHANGED: Default expiry is now 5 minutes to reduce matching collisions ---
+        expiry_minutes = 5
         try:
             response = supabase.table('settings').select('value').eq('key', 'qr_code_expiry_minutes').single().execute()
             if response.data and response.data.get('value'):
