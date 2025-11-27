@@ -70,7 +70,7 @@ def parse_payment_email(email_body):
         if not amount_match: return None
         amount = float(amount_match.group(1).replace(',', ''))
         
-        # 2. Extract Reference (Optional)
+        # 2. Extract Reference
         reference_match = re.search(r"reference (\d+)|Notes(?:\s*\(Optional\))?[:\s]\s*(\w+)", email_body, re.IGNORECASE)
         reference_id = None
         if reference_match:
@@ -79,20 +79,20 @@ def parse_payment_email(email_body):
         # 3. Extract Name (Robust)
         from_name = "N/A"
         
-        # Pattern A: MariBank Style (From: \n NAME \n If this...)
-        # Captures text between "From:" and "If this" across newlines
-        maribank_match = re.search(r"From:[\s\r\n]+([A-Za-z\s]+?)[\s\r\n]+If this", email_body, re.IGNORECASE)
+        # Pattern 1: Multiline (MariBank Style) - "From:\nNAME\n"
+        multiline_match = re.search(r"(?:From|Payer|Sent by):\s*[\r\n]+([^\r\n]+)", email_body, re.IGNORECASE)
         
-        # Pattern B: Standard (From: NAME)
-        standard_match = re.search(r"(?:From|Transfer from|Payer|Sent by|Paid by)[\s:]+([A-Za-z\s]+?)(?=\n|\r|$)", email_body, re.IGNORECASE)
+        # Pattern 2: Singleline - "From: NAME"
+        singleline_match = re.search(r"(?:From|Payer|Sent by):\s*([A-Za-z\s]+?)(?=\n|\r|$)", email_body, re.IGNORECASE)
 
-        if maribank_match:
-            from_name = maribank_match.group(1).strip()
-        elif standard_match:
-            from_name = standard_match.group(1).strip()
-        
-        # Cleanup name (remove extra newlines if caught)
-        from_name = " ".join(from_name.split())
+        if multiline_match:
+            from_name = multiline_match.group(1).strip()
+        elif singleline_match:
+            from_name = singleline_match.group(1).strip()
+            
+        # Clean up any accidental capture of the next section header "If this..."
+        if "If this" in from_name:
+            from_name = from_name.split("If this")[0].strip()
 
         logging.info(f"Parsed email: Amount=${amount}, Reference={reference_id or 'N/A'}, From={from_name}")
         return {"amount": amount, "reference_id": reference_id, "from_name": from_name}
@@ -101,39 +101,24 @@ def parse_payment_email(email_body):
     return None
 
 def names_are_equivalent(bank_name, user_name):
-    """
-    Checks if two names are equivalent regardless of:
-    1. Case (upper/lower)
-    2. Word order (sequence)
-    3. Spaces (if user combined them)
-    """
     if not bank_name or not user_name:
         return False
     
-    # Normalize strings
     norm_bank = bank_name.lower().strip()
     norm_user = user_name.lower().strip()
     
-    # Direct match
     if norm_bank == norm_user:
         return True
         
-    # Split into words
     bank_words = norm_bank.split()
     user_words = norm_user.split()
     
-    # 1. Check sorted words match (Sequence insensitive)
-    # e.g. "Tan David" == "David Tan"
+    # 1. Sequence Insensitive
     if sorted(bank_words) == sorted(user_words):
         return True
         
-    # 2. Check combined match (Space insensitive)
-    # e.g. User: "shengjunton", Bank: "TON SHENG JUN"
-    # We combine bank words into permutations and check if any match the user string
+    # 2. Space Insensitive
     user_no_space = norm_user.replace(" ", "")
-    
-    # Generate all orders of bank words: "tonshengjun", "shengjunton", etc.
-    # Note: Only do this if word count is small (<5) to avoid perf issues
     if len(bank_words) < 5:
         for p in permutations(bank_words):
             if "".join(p) == user_no_space:
@@ -158,7 +143,6 @@ def process_emails():
             mail.logout()
             return
 
-        # Fetch message IDs to deduplicate
         message_id_headers = []
         for msg_id in message_ids:
             _, msg_data = mail.fetch(msg_id, "(BODY[HEADER.FIELDS (MESSAGE-ID)])")
@@ -173,7 +157,6 @@ def process_emails():
             mail.logout()
             return
             
-        # Check DB for existing IDs
         response = supabase.table('processed_emails').select('message_id').in_('message_id', message_id_headers).execute()
         db_processed_ids = {row['message_id'] for row in response.data}
         
@@ -183,7 +166,6 @@ def process_emails():
                 if isinstance(response_part, tuple):
                     msg = email.message_from_bytes(response_part[1])
                     message_id_header_full = msg.get('Message-ID', '').strip()
-                    
                     match = re.search(r"<([^>]+)>", message_id_header_full)
                     message_id = match.group(1) if match else None
 
@@ -216,8 +198,8 @@ def update_order_status(details):
     from_name = details["from_name"]
     
     try:
-        # Window: 10 minutes
-        time_window_start = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        # Increased to 30 mins to ensure we catch slow emails during testing
+        time_window_start = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
         
         # 1. Exact Match via Reference ID
         if reference_id:
@@ -240,14 +222,12 @@ def update_order_status(details):
         potential_matches = []
         
         if from_name and from_name != "N/A":
-            # Strict Name Match using new robust logic
             logging.info(f"Attempting Strict Match by Name: '{from_name}'")
             for order in response.data:
                 user_remitter_name = order.get('remitter_name')
                 if names_are_equivalent(from_name, user_remitter_name):
                     potential_matches.append(order)
         else:
-            # Fallback logic: If name parsing failed (N/A) or bank didn't send name
             logging.warning("Sender Name is N/A. Checking for unique amount match.")
             if response.data:
                 potential_matches = response.data
@@ -266,7 +246,7 @@ def update_order_status(details):
             send_admin_alert(amount, from_name, potential_matches)
             
         else:
-            logging.warning(f"No match found for S${amount:.2f} (Window: 10m).")
+            logging.warning(f"No match found for S${amount:.2f} (Window: 30m). Name from Email: '{from_name}'")
 
     except Exception as e:
         logging.error(f"Error updating order status: {e}", exc_info=True)
