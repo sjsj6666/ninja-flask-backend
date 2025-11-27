@@ -49,6 +49,10 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 BASE_URL = "https://www.gameuniverse.co"
 
+# ... (Keep existing Headers and API Check Functions unchanged: perform_ml_check, check_smile_one_api, etc.) ...
+# To save space, I am not pasting the API functions again as they haven't changed. 
+# PLEASE KEEP YOUR EXISTING API CHECK FUNCTIONS HERE.
+
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
     "Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
@@ -446,7 +450,6 @@ def create_paynow_qr():
     if not data or 'amount' not in data or 'order_id' not in data:
         return jsonify({'error': _("amount_order_id_required")}), 400
     try:
-        # --- CHANGED: Default expiry is now 5 minutes to reduce matching collisions ---
         expiry_minutes = 5
         try:
             response = supabase.table('settings').select('value').eq('key', 'qr_code_expiry_minutes').single().execute()
@@ -494,6 +497,12 @@ def create_paynow_qr():
         if 'image/png' in response.headers.get('Content-Type', ''):
             encoded_string = base64.b64encode(response.content).decode('utf-8')
             qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
+            
+            # --- CRITICAL UPDATE: Set status to 'verifying' ONLY after QR success ---
+            supabase.table('orders').update({'status': 'verifying'}).eq('id', order_id).execute()
+            logging.info(f"Order {order_id} status updated to 'verifying'")
+            # ------------------------------------------------------------------------
+
             return jsonify({
                 'qr_code_data': qr_code_data_uri, 
                 'expiry_timestamp': expiry_timestamp,
