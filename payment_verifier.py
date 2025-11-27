@@ -65,6 +65,10 @@ def send_admin_alert(amount, from_name, potential_matches):
 
 def parse_payment_email(email_body):
     try:
+        # DEBUG: Log raw body to see what regex sees
+        # Limit length to avoid log spam, but capture enough context
+        logging.info(f"DEBUG EMAIL BODY START:\n{email_body[:500]}\nDEBUG EMAIL BODY END")
+
         # 1. Extract Amount
         amount_match = re.search(r"(?:S\$|SGD)\s?([\d,]+\.\d{2})", email_body, re.IGNORECASE)
         if not amount_match: return None
@@ -76,23 +80,19 @@ def parse_payment_email(email_body):
         if reference_match:
             reference_id = (reference_match.group(1) or reference_match.group(2)).strip()
         
-        # 3. Extract Name (Robust)
+        # 3. Extract Name (Updated Strategy)
         from_name = "N/A"
         
-        # Pattern 1: Multiline (MariBank Style) - "From:\nNAME\n"
-        multiline_match = re.search(r"(?:From|Payer|Sent by):\s*[\r\n]+([^\r\n]+)", email_body, re.IGNORECASE)
+        # Strategy: Look for "From:" then capture non-empty characters until "If this" or double newline
+        # Using DOTALL to capture across newlines if needed, but carefully
+        match = re.search(r"(?:From|Payer|Sent by):\s*(.+?)\s*(?:If this|Transaction Time)", email_body, re.IGNORECASE | re.DOTALL)
         
-        # Pattern 2: Singleline - "From: NAME"
-        singleline_match = re.search(r"(?:From|Payer|Sent by):\s*([A-Za-z\s]+?)(?=\n|\r|$)", email_body, re.IGNORECASE)
-
-        if multiline_match:
-            from_name = multiline_match.group(1).strip()
-        elif singleline_match:
-            from_name = singleline_match.group(1).strip()
-            
-        # Clean up any accidental capture of the next section header "If this..."
-        if "If this" in from_name:
-            from_name = from_name.split("If this")[0].strip()
+        if match:
+            raw_name = match.group(1).strip()
+            # Clean up: If there are newlines, take the last non-empty line (likely the name)
+            lines = [line.strip() for line in raw_name.split('\n') if line.strip()]
+            if lines:
+                from_name = lines[-1] # Usually the name is the specific data point
 
         logging.info(f"Parsed email: Amount=${amount}, Reference={reference_id or 'N/A'}, From={from_name}")
         return {"amount": amount, "reference_id": reference_id, "from_name": from_name}
@@ -113,11 +113,9 @@ def names_are_equivalent(bank_name, user_name):
     bank_words = norm_bank.split()
     user_words = norm_user.split()
     
-    # 1. Sequence Insensitive
     if sorted(bank_words) == sorted(user_words):
         return True
         
-    # 2. Space Insensitive
     user_no_space = norm_user.replace(" ", "")
     if len(bank_words) < 5:
         for p in permutations(bank_words):
@@ -198,10 +196,9 @@ def update_order_status(details):
     from_name = details["from_name"]
     
     try:
-        # Increased to 30 mins to ensure we catch slow emails during testing
-        time_window_start = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        # Increase window to 1 hour to handle time zone/server drift issues during testing
+        time_window_start = (datetime.now(timezone.utc) - timedelta(minutes=60)).isoformat()
         
-        # 1. Exact Match via Reference ID
         if reference_id:
             response = supabase.table('orders').select('id, total_amount').eq('status', 'verifying').gte('created_at', time_window_start).execute()
             exact_match = []
@@ -246,7 +243,7 @@ def update_order_status(details):
             send_admin_alert(amount, from_name, potential_matches)
             
         else:
-            logging.warning(f"No match found for S${amount:.2f} (Window: 30m). Name from Email: '{from_name}'")
+            logging.warning(f"No match found for S${amount:.2f} (Window: 60m).")
 
     except Exception as e:
         logging.error(f"Error updating order status: {e}", exc_info=True)
