@@ -1,5 +1,3 @@
-# app.py
-
 import os
 import logging
 import time
@@ -16,7 +14,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from supabase import create_client, Client
 from datetime import datetime, timedelta
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 import random
 
 from i18n import i18n, gettext as _
@@ -48,10 +46,7 @@ if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 BASE_URL = "https://www.gameuniverse.co"
-
-# ... (Keep existing Headers and API Check Functions unchanged: perform_ml_check, check_smile_one_api, etc.) ...
-# To save space, I am not pasting the API functions again as they haven't changed. 
-# PLEASE KEEP YOUR EXISTING API CHECK FUNCTIONS HERE.
+DEFAULT_UPLOAD_BUCKET = 'game-images'
 
 SMILE_ONE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
@@ -498,10 +493,8 @@ def create_paynow_qr():
             encoded_string = base64.b64encode(response.content).decode('utf-8')
             qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
             
-            # --- CRITICAL UPDATE: Set status to 'verifying' ONLY after QR success ---
             supabase.table('orders').update({'status': 'verifying'}).eq('id', order_id).execute()
             logging.info(f"Order {order_id} status updated to 'verifying'")
-            # ------------------------------------------------------------------------
 
             return jsonify({
                 'qr_code_data': qr_code_data_uri, 
@@ -519,6 +512,40 @@ def create_paynow_qr():
     except Exception as e:
         logging.error(f"An unexpected error occurred during QR generation: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/proxy-upload', methods=['POST'])
+@cross_origin(origins=allowed_origins, supports_credentials=True)
+@limiter.limit("15/minute")
+def proxy_upload():
+    data = request.get_json()
+    image_url = data.get('url')
+    if not image_url:
+        return jsonify({"error": "No URL provided"}), 400
+    logging.info(f"Proxying image from URL: {image_url}")
+    try:
+        response = requests.get(image_url, stream=True, timeout=10)
+        response.raise_for_status()
+        image_data = response.content
+        path = urlparse(image_url).path
+        ext = os.path.splitext(path)[1]
+        if not ext:
+            content_type = response.headers.get('content-type')
+            ext = f".{content_type.split('/')[1]}" if content_type and 'image' in content_type else ".jpg"
+        new_file_name = f"proxy-{uuid.uuid4()}{ext}"
+        supabase.storage.from_(DEFAULT_UPLOAD_BUCKET).upload(
+            file=image_data,
+            path=new_file_name,
+            file_options={"content-type": response.headers.get('content-type', 'image/jpeg')}
+        )
+        public_url = supabase.storage.from_(DEFAULT_UPLOAD_BUCKET).get_public_url(new_file_name)
+        logging.info(f"Successfully uploaded to: {public_url}")
+        return jsonify({"newUrl": public_url})
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Failed to download image from source URL: {str(e)}")
+        return jsonify({"error": f"Failed to download image: {str(e)}"}), 500
+    except Exception as e:
+        logging.error(f"An unexpected error occurred during proxy upload: {str(e)}")
+        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
