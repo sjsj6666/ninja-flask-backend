@@ -1,3 +1,5 @@
+# app.py
+
 import os
 import logging
 import time
@@ -16,7 +18,6 @@ from supabase import create_client, Client
 from datetime import datetime, timedelta
 from urllib.parse import urlencode, urlparse
 import random
-
 from i18n import i18n, gettext as _
 
 app = Flask(__name__)
@@ -28,31 +29,28 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-allowed_origins_str = os.environ.get('ALLOWED_ORIGINS', "http://127.0.0.1:5500,http://localhost:5500")
+allowed_origins_str = os.environ.get('ALLOWED_ORIGINS', "http://127.0.0.1:5173,http://localhost:5173")
 allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
-CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
+CORS(app, resources={r"/api/*": {"origins": allowed_origins}}, supports_credentials=True)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 10000))
 
-@app.before_request
-def before_request():
-    g.language = i18n.get_user_language()
-
+# --- Environment Variables & Secrets ---
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
-if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-    raise ValueError("CRITICAL: Supabase credentials must be set as environment variables.")
+HITPAY_API_KEY = os.environ.get('HITPAY_API_KEY')
+BACKEND_URL = os.environ.get('RENDER_EXTERNAL_URL') # Render provides this automatically
+
+if not all([SUPABASE_URL, SUPABASE_SERVICE_KEY, HITPAY_API_KEY, BACKEND_URL]):
+    raise ValueError("CRITICAL: Supabase credentials, HitPay API Key, and BACKEND_URL must be set.")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+# --- Constants & Headers for External APIs ---
 BASE_URL = "https://www.gameuniverse.co"
 DEFAULT_UPLOAD_BUCKET = 'game-images'
-
-SMILE_ONE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15",
-    "Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    "Origin": "https://www.smile.one", "X-Requested-With": "XMLHttpRequest", "Cookie": os.environ.get("SMILE_ONE_COOKIE")
-}
+SMILE_ONE_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1.1 Safari/605.1.15", "Accept": "application/json, text/javascript, */*; q=0.01", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "Origin": "https://www.smile.one", "X-Requested-With": "XMLHttpRequest", "Cookie": os.environ.get("SMILE_ONE_COOKIE") }
 BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
 BIGO_NATIVE_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/" }
 SPACEGAMING_VALIDATE_URL = "https://spacegaming.sg/wp-json/endpoint/validate_v2"
@@ -66,32 +64,16 @@ NUVERSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
 ROM_XD_VALIDATE_URL = "https://xdsdk-intnl-6.xd.com/product/v1/query/game/role"
 ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
 RAZER_RO_ORIGIN_VALIDATE_URL = "https://gold.razer.com/api/ext/custom/gravity-ragnarok-origin/users"
-RAZER_RO_ORIGIN_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "application/json, text/plain, */*",
-    "Referer": "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin"
-}
+RAZER_RO_ORIGIN_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "application/json, text/plain, */*", "Referer": "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin" }
 GAMINGNP_VALIDATE_URL = "https://gaming.com.np/ajaxCheckId"
-GAMINGNP_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15",
-    "Accept": "*/*",
-    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    "Origin": "https://gaming.com.np",
-    "X-Requested-With": "XMLHttpRequest"
-}
+GAMINGNP_HEADERS = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15", "Accept": "*/*", "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", "Origin": "https://gaming.com.np", "X-Requested-With": "XMLHttpRequest" }
 GARENA_LOGIN_URL = "https://shop.garena.sg/api/auth/player_id_login"
 GARENA_ROLES_URL = "https://shop.garena.sg/api/shop/apps/roles"
-GARENA_HEADERS = {
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'en-SG,en-GB;q=0.9,en;q=0.8',
-    'Connection': 'keep-alive',
-    'Content-Type': 'application/json',
-    'Origin': 'https://shop.garena.sg',
-    'Sec-Fetch-Dest': 'empty',
-    'Sec-Fetch-Mode': 'cors',
-    'Sec-Fetch-Site': 'same-origin',
-    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
-}
+GARENA_HEADERS = { 'Accept': 'application/json, text/plain, */*', 'Accept-Language': 'en-SG,en-GB;q=0.9,en;q=0.8', 'Connection': 'keep-alive', 'Content-Type': 'application/json', 'Origin': 'https://shop.garena.sg', 'Sec-Fetch-Dest': 'empty', 'Sec-Fetch-Mode': 'cors', 'Sec-Fetch-Site': 'same-origin', 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15', }
+
+@app.before_request
+def before_request():
+    g.language = i18n.get_user_language()
 
 def perform_ml_check(user_id, zone_id):
     try:
@@ -117,12 +99,7 @@ def perform_ml_check(user_id, zone_id):
     return fallback_result
 
 def check_smile_one_api(game_code, uid, server_id=None):
-    endpoints = {
-        "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole",
-        "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole?product=bloodstrike",
-        "loveanddeepspace": "https://www.smile.one/merchant/loveanddeepspace/checkrole/",
-        "magicchessgogo": "https://www.smile.one/br/merchant/game/checkrole?product=magicchessgogo"
-    }
+    endpoints = { "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole?product=bloodstrike", "loveanddeepspace": "https://www.smile.one/merchant/loveanddeepspace/checkrole/", "magicchessgogo": "https://www.smile.one/br/merchant/game/checkrole?product=magicchessgogo" }
     pids = {"mobilelegends": "25", "bloodstrike": "20294"}
     if game_code not in endpoints: return {"status": "error", "message": _("game_not_configured", game=game_code)}
     pid_to_use = pids.get(game_code)
@@ -181,10 +158,7 @@ def check_bigo_native_api(uid):
     except Exception: return {"status": "error", "message": _("api_error", service="Bigo")}
 
 def check_gamingnp_api(game_code, uid):
-    game_params = {
-        "hok": {"categoryId": "3898", "referer": "https://gaming.com.np/topup/honor-of-kings"},
-        "pubgm": {"categoryId": "3920", "referer": "https://gaming.com.np/topup/pubg-mobile-global"}
-    }
+    game_params = { "hok": {"categoryId": "3898", "referer": "https://gaming.com.np/topup/honor-of-kings"}, "pubgm": {"categoryId": "3920", "referer": "https://gaming.com.np/topup/pubg-mobile-global"} }
     if game_code not in game_params:
         return {"status": "error", "message": "Game not configured for this API."}
     payload = { "userid": uid, "game": game_code, "categoryId": game_params[game_code]["categoryId"] }
@@ -229,12 +203,9 @@ def check_netease_api(game_path, server_id, role_id):
 
 def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server_name):
     razer_server_id = server_id_map.get(server_name)
-    if not razer_server_id:
-        return {"status": "error", "message": _("invalid_server")}
-    if api_path == "genshinimpact":
-        url = f"https://gold.razer.com/api/ext/{api_path}/users/{uid}"
-    else:
-        url = f"{RAZER_BASE_URL}/{api_path}/users/{uid}"
+    if not razer_server_id: return {"status": "error", "message": _("invalid_server")}
+    if api_path == "genshinimpact": url = f"https://gold.razer.com/api/ext/{api_path}/users/{uid}"
+    else: url = f"{RAZER_BASE_URL}/{api_path}/users/{uid}"
     params = {"serverId": razer_server_id}
     current_headers = RAZER_HEADERS.copy()
     current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{referer_slug}"
@@ -300,12 +271,7 @@ def check_ro_origin_razer_api(uid, server_id):
         if response.status_code == 200:
             data = response.json()
             if data.get("roles") and isinstance(data["roles"], list):
-                transformed_roles = []
-                for role in data["roles"]:
-                    transformed_roles.append({
-                        "roleId": role.get("CharacterId"),
-                        "roleName": role.get("Name")
-                    })
+                transformed_roles = [{"roleId": role.get("CharacterId"), "roleName": role.get("Name")} for role in data["roles"]]
                 return {"status": "success", "roles": transformed_roles}
         return {"status": "error", "message": "Invalid Secret Code or no characters on this server."}
     except Exception as e:
@@ -314,20 +280,9 @@ def check_ro_origin_razer_api(uid, server_id):
 
 def get_ro_origin_servers():
     logging.info("Returning hardcoded RO Origin server list.")
-    servers_list = [
-        {"server_id": 1, "server_name": "Prontera-(1~3)/Izlude-9(-10)/Morroc-(1~10)"},
-        {"server_id": 4, "server_name": "Prontera-(4~6)/Prontera-10/Izlude-(1~8)"},
-        {"server_id": 7, "server_name": "Prontera-(7~9)/Geffen-(1~10)/Payon-(1~10)"},
-        {"server_id": 51, "server_name": "Poring Island-(1~10)/Orc Village-(1~10)/Shipwreck-(1~9)/Memoria/Awakening/Ant Hell-(1~10)/Goblin Forest-1(-2-4)/Valentine"},
-        {"server_id": 95, "server_name": "Lasagna/1st-Anniversary/Goblin Forest-7/For Honor/Sakura Vows/Goblin Forest-10/Garden-1"},
-        {"server_id": 102, "server_name": "1.5th Anniversary/Vicland"},
-        {"server_id": 104, "server_name": "2025"},
-        {"server_id": 105, "server_name": "Timeless Love"},
-        {"server_id": 106, "server_name": "2nd Anniversary"},
-        {"server_id": 107, "server_name": "Hugel"}
-    ]
+    servers_list = [ {"server_id": 1, "server_name": "Prontera-(1~3)/Izlude-9(-10)/Morroc-(1~10)"}, {"server_id": 4, "server_name": "Prontera-(4~6)/Prontera-10/Izlude-(1~8)"}, {"server_id": 7, "server_name": "Prontera-(7~9)/Geffen-(1~10)/Payon-(1~10)"}, {"server_id": 51, "server_name": "Poring Island-(1~10)/Orc Village-(1~10)/Shipwreck-(1~9)/Memoria/Awakening/Ant Hell-(1~10)/Goblin Forest-1(-2-4)/Valentine"}, {"server_id": 95, "server_name": "Lasagna/1st-Anniversary/Goblin Forest-7/For Honor/Sakura Vows/Goblin Forest-10/Garden-1"}, {"server_id": 102, "server_name": "1.5th Anniversary/Vicland"}, {"server_id": 104, "server_name": "2025"}, {"server_id": 105, "server_name": "Timeless Love"}, {"server_id": 106, "server_name": "2nd Anniversary"}, {"server_id": 107, "server_name": "Hugel"} ]
     return {"status": "success", "servers": servers_list}
-    
+
 def check_garena_api(app_id, uid):
     with requests.Session() as s:
         s.headers.update(GARENA_HEADERS)
@@ -362,7 +317,6 @@ def health_check():
 
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
-@cross_origin(origins=allowed_origins, supports_credentials=True)
 @limiter.limit("10/minute")
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": _("user_id_required")}), 400
@@ -406,14 +360,12 @@ def check_game_id(game_slug, uid, server_id):
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
-@app.route('/ro-origin/get-servers', methods=['GET', 'OPTIONS'])
-@cross_origin(origins=allowed_origins, supports_credentials=True)
+@app.route('/ro-origin/get-servers', methods=['GET'])
 def handle_ro_origin_get_servers():
     result = get_ro_origin_servers()
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
-@app.route('/ro-origin/get-roles', methods=['POST', 'OPTIONS'])
-@cross_origin(origins=allowed_origins, supports_credentials=True)
+@app.route('/ro-origin/get-roles', methods=['POST'])
 def handle_ro_origin_get_roles():
     data = request.get_json()
     uid = data.get('userId')
@@ -423,129 +375,72 @@ def handle_ro_origin_get_roles():
     result = check_ro_origin_razer_api(uid, server_id)
     return jsonify(result), 200 if result.get("status") == "success" else 400
 
-@app.route('/sitemap.xml')
-def generate_sitemap():
-    try:
-        response = supabase.from_('games').select('slug').eq('is_active', True).execute()
-        games = response.data
-        static_pages = ['/', '/about.html', '/contact.html', '/reviews.html', '/past-transactions.html', '/faq.html', '/login.html', '/signup.html']
-        xml_parts = ['<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
-        for page in static_pages: xml_parts.append(f'  <url><loc>{BASE_URL}{page}</loc><changefreq>weekly</changefreq><priority>0.8</priority></url>')
-        for game in games:
-            if game.get('slug'): xml_parts.append(f'  <url><loc>{BASE_URL}/topup.html?game={game["slug"]}</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>')
-        xml_parts.append('</urlset>')
-        return Response("\n".join(xml_parts), mimetype='application/xml')
-    except Exception as e: return jsonify({"error": "Could not generate sitemap"}), 500
-
-@app.route('/create-paynow-qr', methods=['POST'])
-@cross_origin(origins=allowed_origins, supports_credentials=True)
-@limiter.limit("5/minute")
-def create_paynow_qr():
+@app.route('/api/create-payment', methods=['POST'])
+@limiter.limit("10/minute")
+def create_hitpay_payment():
     data = request.get_json()
-    if not data or 'amount' not in data or 'order_id' not in data:
-        return jsonify({'error': _("amount_order_id_required")}), 400
+    amount = data.get('amount')
+    order_id = data.get('order_id')
+    redirect_url = data.get('redirect_url')
+
+    if not all([amount, order_id, redirect_url]):
+        return jsonify({'status': 'error', 'message': 'Amount, Order ID, and Redirect URL are required.'}), 400
+
     try:
-        expiry_minutes = 5
-        try:
-            response = supabase.table('settings').select('value').eq('key', 'qr_code_expiry_minutes').single().execute()
-            if response.data and response.data.get('value'):
-                expiry_minutes = int(response.data['value'])
-        except Exception as e:
-            logging.error(f"Could not fetch expiry setting from Supabase, using default. Error: {e}")
+        webhook_url = f"{BACKEND_URL}/api/webhook-handler"
+        logging.info(f"Creating HitPay request for order {order_id} with amount {amount} and webhook {webhook_url}")
 
-        paynow_uen = os.environ.get('PAYNOW_UEN')
-        if not paynow_uen:
-            raise ValueError(_("paynow_uen_not_configured"))
-
-        amount = f"{float(data['amount']):.2f}"
-        order_id = str(data['order_id'])
-        
-        sgt_timezone = pytz.timezone('Asia/Singapore')
-        now_in_sgt = datetime.now(sgt_timezone)
-        expiry_time_sgt = now_in_sgt + timedelta(minutes=expiry_minutes)
-        expiry_timestamp = int(expiry_time_sgt.timestamp() * 1000)
-
-        maybank_url = "https://sslsecure.maybank.com.sg/scripts/mbb_qrcode/mbb_qrcode.jsp"
-        
-        numeric_ref = str(int(order_id.replace('-', '')[:15], 16))[-8:]
-
-        params = {
-            'proxyValue': paynow_uen,
-            'proxyType': 'UEN',
-            'merchantName': 'NA',
-            'amount': amount,
-            'reference': numeric_ref,
-            'amountInd': 'N',
-            'expiryDate': '',
-            'rnd': random.random()
-        }
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15',
-            'Referer': 'https://sslsecure.maybank.com.sg/cgi-bin/mbs/scripts/mbb_cas/mbb_cas_qrcodegen_mbs.jsp'
-        }
-        
-        logging.info(f"Requesting Maybank QR with params: {params}")
-        response = requests.get(maybank_url, params=params, headers=headers, timeout=20, verify=True)
-        response.raise_for_status()
-
-        if 'image/png' in response.headers.get('Content-Type', ''):
-            encoded_string = base64.b64encode(response.content).decode('utf-8')
-            qr_code_data_uri = f"data:image/png;base64,{encoded_string}"
-            
-            supabase.table('orders').update({'status': 'verifying'}).eq('id', order_id).execute()
-            logging.info(f"Order {order_id} status updated to 'verifying'")
-
-            return jsonify({
-                'qr_code_data': qr_code_data_uri, 
-                'expiry_timestamp': expiry_timestamp,
-                'reference_id': numeric_ref,
-                'message': _("qr_generated_successfully")
-            })
-        
-        logging.error(f"Maybank API returned non-image content. Status: {response.status_code}, Content: {response.text[:200]}")
-        return jsonify({'error': _("invalid_qr_service_response")}), 502
-
-    except requests.exceptions.RequestException as e:
-        logging.error(f"HTTP Request to Maybank failed: {e}")
-        return jsonify({"error": _("qr_service_connection_error")}), 504
-    except Exception as e:
-        logging.error(f"An unexpected error occurred during QR generation: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route('/proxy-upload', methods=['POST'])
-@cross_origin(origins=allowed_origins, supports_credentials=True)
-@limiter.limit("15/minute")
-def proxy_upload():
-    data = request.get_json()
-    image_url = data.get('url')
-    if not image_url:
-        return jsonify({"error": "No URL provided"}), 400
-    logging.info(f"Proxying image from URL: {image_url}")
-    try:
-        response = requests.get(image_url, stream=True, timeout=10)
-        response.raise_for_status()
-        image_data = response.content
-        path = urlparse(image_url).path
-        ext = os.path.splitext(path)[1]
-        if not ext:
-            content_type = response.headers.get('content-type')
-            ext = f".{content_type.split('/')[1]}" if content_type and 'image' in content_type else ".jpg"
-        new_file_name = f"proxy-{uuid.uuid4()}{ext}"
-        supabase.storage.from_(DEFAULT_UPLOAD_BUCKET).upload(
-            file=image_data,
-            path=new_file_name,
-            file_options={"content-type": response.headers.get('content-type', 'image/jpeg')}
+        response = requests.post(
+            'https://api.hitpay.com/v1/payment-requests',
+            headers={
+                'X-BUSINESS-API-KEY': HITPAY_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            json={
+                'amount': float(amount),
+                'reference_number': order_id,
+                'currency': 'SGD',
+                'redirect_url': redirect_url,
+                'webhook': webhook_url
+            },
+            timeout=15
         )
-        public_url = supabase.storage.from_(DEFAULT_UPLOAD_BUCKET).get_public_url(new_file_name)
-        logging.info(f"Successfully uploaded to: {public_url}")
-        return jsonify({"newUrl": public_url})
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Failed to download image from source URL: {str(e)}")
-        return jsonify({"error": f"Failed to download image: {str(e)}"}), 500
+
+        response_data = response.json()
+
+        if not response.ok or 'url' not in response_data:
+            logging.error(f"HitPay API Error: {response_data}")
+            raise Exception(response_data.get('message', 'Failed to create payment request.'))
+
+        logging.info(f"Successfully created HitPay payment link for order {order_id}")
+        return jsonify({'status': 'success', 'payment_url': response_data['url']})
+
     except Exception as e:
-        logging.error(f"An unexpected error occurred during proxy upload: {str(e)}")
-        return jsonify({"error": f"An unexpected error occurred: {str(e)}"}), 500
+        logging.error(f"Error creating HitPay payment link: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/api/webhook-handler', methods=['POST'])
+def hitpay_webhook_handler():
+    payment_data = request.form.to_dict()
+    logging.info(f"Received HitPay webhook for reference: {payment_data.get('reference_number')}")
+
+    if payment_data.get('status') == 'completed':
+        order_id = payment_data.get('reference_number')
+        
+        if order_id:
+            logging.info(f"Payment completed for order {order_id}. Updating status to 'processing'.")
+            
+            update_response = supabase.table('orders').update({
+                'status': 'processing',
+                'completed_at': datetime.utcnow().isoformat()
+            }).eq('id', order_id).execute()
+
+            if update_response.data:
+                logging.info(f"Successfully updated order {order_id}.")
+            else:
+                logging.error(f"Failed to update order {order_id}: {update_response}")
+
+    return 'OK', 200
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
