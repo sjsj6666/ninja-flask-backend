@@ -389,13 +389,12 @@ def create_hitpay_payment():
             'X-Requested-With': 'XMLHttpRequest'
         }
 
-        # Ensure correct URL (with hyphen)
-        response = requests.post(
-            'https://api.hit-pay.com/v1/payment-requests',
-            headers=headers,
-            json=payload,
-            timeout=15
-        )
+response = requests.post(
+    'https://api.sandbox.hit-pay.com/v1/payment-requests',
+    headers=headers,
+    json=payload,
+    timeout=15
+)
 
         response_data = response.json()
 
