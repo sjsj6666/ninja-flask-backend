@@ -38,18 +38,39 @@ port = int(os.environ.get("PORT", 10000))
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
-HITPAY_API_KEY = os.environ.get('HITPAY_API_KEY')
-HITPAY_SALT = os.environ.get('HITPAY_SALT')
 BACKEND_URL = os.environ.get('RENDER_EXTERNAL_URL')
 
-if not all([SUPABASE_URL, SUPABASE_SERVICE_KEY, HITPAY_API_KEY, HITPAY_SALT, BACKEND_URL]):
-    raise ValueError("CRITICAL: Supabase credentials, HitPay Keys, and BACKEND_URL must be set.")
+if not all([SUPABASE_URL, SUPABASE_SERVICE_KEY, BACKEND_URL]):
+    raise ValueError("CRITICAL: Supabase credentials and BACKEND_URL must be set.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 @app.before_request
 def before_request():
     g.language = i18n.get_user_language()
+
+def get_hitpay_config():
+    try:
+        response = supabase.table('settings').select('key, value').in_('key', ['hitpay_mode', 'hitpay_api_key_sandbox', 'hitpay_salt_sandbox', 'hitpay_api_key_live', 'hitpay_salt_live']).execute()
+        settings = {item['key']: item['value'] for item in response.data}
+        
+        mode = settings.get('hitpay_mode', 'sandbox')
+        
+        if mode == 'live':
+            return {
+                'url': 'https://api.hit-pay.com/v1/payment-requests',
+                'key': settings.get('hitpay_api_key_live'),
+                'salt': settings.get('hitpay_salt_live')
+            }
+        else:
+            return {
+                'url': 'https://api.sandbox.hit-pay.com/v1/payment-requests',
+                'key': settings.get('hitpay_api_key_sandbox'),
+                'salt': settings.get('hitpay_salt_sandbox')
+            }
+    except Exception as e:
+        logging.error(f"Error fetching HitPay config: {e}")
+        return None
 
 BASE_URL = "https://www.gameuniverse.co"
 DEFAULT_UPLOAD_BUCKET = 'game-images'
@@ -367,6 +388,10 @@ def create_hitpay_payment():
     if not all([amount, order_id, redirect_url]):
         return jsonify({'status': 'error', 'message': 'Amount, Order ID, and Redirect URL are required.'}), 400
 
+    config = get_hitpay_config()
+    if not config or not config['key']:
+        return jsonify({'status': 'error', 'message': 'Payment gateway not configured.'}), 500
+
     try:
         webhook_url = f"{BACKEND_URL}/api/webhook-handler"
         logging.info(f"Creating HitPay request for order {order_id} with amount {amount}")
@@ -378,23 +403,23 @@ def create_hitpay_payment():
             'redirect_url': redirect_url,
             'webhook': webhook_url,
             'purpose': product_name,
-            'channel': 'api_custom', # <--- FIXED: Changed from 'api_payout' to 'api_custom'
+            'channel': 'api_custom',
             'email': data.get('email', 'customer@example.com'),
             'name': data.get('name', 'GameVault Customer')
         }
         
         headers = {
-            'X-BUSINESS-API-KEY': HITPAY_API_KEY,
+            'X-BUSINESS-API-KEY': config['key'],
             'Content-Type': 'application/json',
             'X-Requested-With': 'XMLHttpRequest'
         }
 
-response = requests.post(
-    'https://api.sandbox.hit-pay.com/v1/payment-requests',
-    headers=headers,
-    json=payload,
-    timeout=15
-)
+        response = requests.post(
+            config['url'],
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
 
         response_data = response.json()
 
@@ -419,9 +444,10 @@ def hitpay_webhook_handler():
 
         hitpay_signature = request.headers.get('X-Business-Signature')
         
-        if HITPAY_SALT:
+        config = get_hitpay_config()
+        if config and config['salt']:
             generated_signature = hmac.new(
-                key=bytes(HITPAY_SALT, 'utf-8'),
+                key=bytes(config['salt'], 'utf-8'),
                 msg=raw_body,
                 digestmod=hashlib.sha256
             ).hexdigest()
