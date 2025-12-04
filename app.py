@@ -389,8 +389,9 @@ def create_hitpay_payment():
             'X-Requested-With': 'XMLHttpRequest'
         }
 
+        # FIXED URL: Added hyphen in hit-pay.com
         response = requests.post(
-            'https://api.hitpay.com/v1/payment-requests',
+            'https://api.hit-pay.com/v1/payment-requests',
             headers=headers,
             json=payload,
             timeout=15
@@ -456,3 +457,4 @@ def hitpay_webhook_handler():
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
+    
