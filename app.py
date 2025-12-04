@@ -378,7 +378,7 @@ def create_hitpay_payment():
             'redirect_url': redirect_url,
             'webhook': webhook_url,
             'purpose': product_name,
-            'channel': 'api_payout',
+            'channel': 'api_custom', # <--- FIXED: Changed from 'api_payout' to 'api_custom'
             'email': data.get('email', 'customer@example.com'),
             'name': data.get('name', 'GameVault Customer')
         }
@@ -389,7 +389,7 @@ def create_hitpay_payment():
             'X-Requested-With': 'XMLHttpRequest'
         }
 
-        # FIXED URL: Added hyphen in hit-pay.com
+        # Ensure correct URL (with hyphen)
         response = requests.post(
             'https://api.hit-pay.com/v1/payment-requests',
             headers=headers,
@@ -457,4 +457,3 @@ def hitpay_webhook_handler():
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
-    
