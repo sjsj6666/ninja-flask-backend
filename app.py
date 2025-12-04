@@ -461,11 +461,11 @@ def hitpay_webhook_handler():
 
         if order_id:
             if status == 'completed':
-                logging.info(f"Payment completed for order {order_id}. Updating status to 'paid'.")
+                logging.info(f"Payment completed for order {order_id}. Updating status to 'processing'.")
                 supabase.table('orders').update({
-                    'status': 'paid',
-                    'payment_id': payment_id,
-                    'completed_at': datetime.utcnow().isoformat()
+                    'status': 'processing',  # Changed from 'paid' to 'processing'
+                    'payment_id': payment_id
+                    # Removed completed_at so admin can set it later
                 }).eq('id', order_id).execute()
             elif status == 'failed':
                 logging.info(f"Payment failed for order {order_id}.")
