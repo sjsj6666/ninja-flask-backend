@@ -369,24 +369,6 @@ def check_game_id(game_slug, uid, server_id):
     status_code = 200 if result.get("status") == "success" else 400
     return jsonify(result), status_code
 
-@app.route('/debug-proxy')
-def debug_proxy():
-    try:
-        direct_resp = requests.get("https://api.ipify.org?format=json", timeout=5)
-        direct_ip = direct_resp.json().get('ip')
-        
-        proxy_resp = requests.get("https://api.ipify.org?format=json", proxies=PROXIES, timeout=5)
-        proxy_ip = proxy_resp.json().get('ip')
-        
-        return jsonify({
-            "status": "success",
-            "render_server_ip": direct_ip,
-            "alibaba_proxy_ip": proxy_ip,
-            "proxy_working": direct_ip != proxy_ip and proxy_ip == "47.84.96.104"
-        })
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
-
 @app.route('/ro-origin/get-servers', methods=['GET', 'OPTIONS'])
 def handle_ro_origin_get_servers():
     result = get_ro_origin_servers()
@@ -490,21 +472,4 @@ def hitpay_webhook_handler():
             if status == 'completed':
                 logging.info(f"Payment completed for order {order_id}. Updating status to 'processing'.")
                 supabase.table('orders').update({
-                    'status': 'processing',
-                    'payment_id': payment_id
-                }).eq('id', order_id).execute()
-            elif status == 'failed':
-                logging.info(f"Payment failed for order {order_id}.")
-                supabase.table('orders').update({
-                    'status': 'failed',
-                    'updated_at': datetime.utcnow().isoformat()
-                }).eq('id', order_id).execute()
-
-        return Response(status=200)
-
-    except Exception as e:
-        logging.error(f"Webhook Error: {e}")
-        return Response(status=200)
-
-if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=port, debug=False)
+                    'status': 'proc
