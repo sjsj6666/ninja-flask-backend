@@ -39,6 +39,12 @@ port = int(os.environ.get("PORT", 10000))
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 BACKEND_URL = os.environ.get('RENDER_EXTERNAL_URL')
+PROXY_URL = os.environ.get('PROXY_URL')
+
+PROXIES = {
+    "http": PROXY_URL,
+    "https": PROXY_URL
+} if PROXY_URL else None
 
 if not all([SUPABASE_URL, SUPABASE_SERVICE_KEY, BACKEND_URL]):
     raise ValueError("CRITICAL: Supabase credentials and BACKEND_URL must be set.")
@@ -99,7 +105,7 @@ def perform_ml_check(user_id, zone_id):
     try:
         api_url = "https://cekidml.caliph.dev/api/validasi"
         params = {'id': user_id, 'serverid': zone_id}
-        response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7)
+        response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7, proxies=PROXIES)
         if response.status_code == 200:
             data = response.json()
             if data.get("status") == "success" and data.get("result", {}).get("nickname"):
@@ -140,7 +146,7 @@ def check_smile_one_api(game_code, uid, server_id=None):
     else:
         params.update({"uid": uid, "sid": sid_to_use, "pid": pid_to_use})
     try:
-        response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where(), proxies=PROXIES)
         data = {}
         if "text/html" in response.headers.get('content-type', ''):
             try:
@@ -165,7 +171,7 @@ def check_smile_one_api(game_code, uid, server_id=None):
 def check_bigo_native_api(uid):
     params = {"isFromApp": "0", "bigoId": uid}
     try:
-        response = requests.get(BIGO_NATIVE_VALIDATE_URL, params=params, headers=BIGO_NATIVE_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.get(BIGO_NATIVE_VALIDATE_URL, params=params, headers=BIGO_NATIVE_HEADERS, timeout=10, verify=certifi.where(), proxies=PROXIES)
         data = response.json()
         if data.get("result") == 0 and data.get("data", {}).get("nick_name"):
             return {"status": "success", "username": data["data"]["nick_name"].strip()}
@@ -180,7 +186,7 @@ def check_gamingnp_api(game_code, uid):
     headers = GAMINGNP_HEADERS.copy()
     headers["Referer"] = game_params[game_code]["referer"]
     try:
-        response = requests.post(GAMINGNP_VALIDATE_URL, data=payload, headers=headers, timeout=10, verify=certifi.where())
+        response = requests.post(GAMINGNP_VALIDATE_URL, data=payload, headers=headers, timeout=10, verify=certifi.where(), proxies=PROXIES)
         data = response.json()
         if data.get("success") and data.get("detail", {}).get("valid") == "valid":
             username = data["detail"].get("name")
@@ -192,7 +198,7 @@ def check_gamingnp_api(game_code, uid):
 def check_spacegaming_api(game_id, uid):
     payload = {"username": uid, "game_id": game_id}
     try:
-        response = requests.post(SPACEGAMING_VALIDATE_URL, json=payload, headers=SPACEGAMING_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.post(SPACEGAMING_VALIDATE_URL, json=payload, headers=SPACEGAMING_HEADERS, timeout=10, verify=certifi.where(), proxies=PROXIES)
         data = response.json()
         if data.get("status") == "true" and data.get("message"):
             return {"status": "success", "username": data["message"].strip()}
@@ -204,7 +210,7 @@ def check_netease_api(game_path, server_id, role_id):
     current_headers = NETEASE_HEADERS.copy()
     current_headers['X-TASK-ID'] = f"transid={params['traceid']},uni_transaction_id=default"
     try:
-        response = requests.get(f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role", params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        response = requests.get(f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role", params=params, headers=current_headers, timeout=10, verify=certifi.where(), proxies=PROXIES)
         data = response.json()
         if data.get("code") == "0000":
             username = data.get("data", {}).get("rolename")
@@ -221,7 +227,7 @@ def check_razer_hoyoverse_api(api_path, referer_slug, server_id_map, uid, server
     current_headers = RAZER_HEADERS.copy()
     current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{referer_slug}"
     try:
-        response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        response = requests.get(url, params=params, headers=current_headers, timeout=10, verify=certifi.where(), proxies=PROXIES)
         data = response.json()
         if response.status_code == 200 and data.get("username"):
             return {"status": "success", "username": data["username"].strip()}
@@ -236,7 +242,7 @@ def check_razer_api(game_path, uid, server_id):
     current_headers = RAZER_HEADERS.copy()
     current_headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{game_path.split('/')[-1]}"
     try:
-        response = requests.get(f"{RAZER_BASE_URL}/{game_path}/users/{uid}", params=params, headers=current_headers, timeout=10, verify=certifi.where())
+        response = requests.get(f"{RAZER_BASE_URL}/{game_path}/users/{uid}", params=params, headers=current_headers, timeout=10, verify=certifi.where(), proxies=PROXIES)
         data = response.json()
         if response.status_code == 200 and data.get("username"):
             return {"status": "success", "username": data["username"].strip()}
@@ -247,7 +253,7 @@ def check_razer_api(game_path, uid, server_id):
 def check_nuverse_api(aid, role_id):
     params = {"tab": "purchase", "aid": aid, "role_id": role_id}
     try:
-        response = requests.get(NUVERSE_VALIDATE_URL, params=params, headers=NUVERSE_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.get(NUVERSE_VALIDATE_URL, params=params, headers=NUVERSE_HEADERS, timeout=10, verify=certifi.where(), proxies=PROXIES)
         data = response.json()
         if data.get("code") == 0 and data.get("message", "").lower() == "success":
             role_info = data.get("data", [{}])[0]
@@ -260,7 +266,7 @@ def check_nuverse_api(aid, role_id):
 def check_rom_xd_api(role_id):
     params = {"source": "webpay", "appId": "2079001", "serverId": "50001", "roleId": role_id}
     try:
-        response = requests.get(ROM_XD_VALIDATE_URL, params=params, headers=ROM_XD_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.get(ROM_XD_VALIDATE_URL, params=params, headers=ROM_XD_HEADERS, timeout=10, verify=certifi.where(), proxies=PROXIES)
         data = response.json()
         if data.get("code") == 200:
             username = data.get("data", {}).get("name")
@@ -272,7 +278,7 @@ def check_ro_origin_razer_api(uid, server_id):
     url = f"{RAZER_RO_ORIGIN_VALIDATE_URL}/{uid}"
     params = {"serverId": server_id}
     try:
-        response = requests.get(url, params=params, headers=RAZER_RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where())
+        response = requests.get(url, params=params, headers=RAZER_RO_ORIGIN_HEADERS, timeout=10, verify=certifi.where(), proxies=PROXIES)
         if response.status_code == 200:
             data = response.json()
             if data.get("roles") and isinstance(data["roles"], list):
@@ -289,6 +295,8 @@ def get_ro_origin_servers():
 def check_garena_api(app_id, uid):
     with requests.Session() as s:
         s.headers.update(GARENA_HEADERS)
+        if PROXIES:
+            s.proxies.update(PROXIES)
         login_payload = {"app_id": int(app_id), "login_id": uid}
         try:
             s.headers["Referer"] = f"https://shop.garena.sg/?app={app_id}"
@@ -418,7 +426,8 @@ def create_hitpay_payment():
             config['url'],
             headers=headers,
             json=payload,
-            timeout=15
+            timeout=15,
+            proxies=PROXIES
         )
 
         response_data = response.json()
@@ -463,9 +472,8 @@ def hitpay_webhook_handler():
             if status == 'completed':
                 logging.info(f"Payment completed for order {order_id}. Updating status to 'processing'.")
                 supabase.table('orders').update({
-                    'status': 'processing',  # Changed from 'paid' to 'processing'
+                    'status': 'processing',
                     'payment_id': payment_id
-                    # Removed completed_at so admin can set it later
                 }).eq('id', order_id).execute()
             elif status == 'failed':
                 logging.info(f"Payment failed for order {order_id}.")
@@ -482,3 +490,4 @@ def hitpay_webhook_handler():
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
+    
