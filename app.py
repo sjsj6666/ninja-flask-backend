@@ -472,4 +472,21 @@ def hitpay_webhook_handler():
             if status == 'completed':
                 logging.info(f"Payment completed for order {order_id}. Updating status to 'processing'.")
                 supabase.table('orders').update({
-                    'status': 'proc
+                    'status': 'processing',
+                    'payment_id': payment_id
+                }).eq('id', order_id).execute()
+            elif status == 'failed':
+                logging.info(f"Payment failed for order {order_id}.")
+                supabase.table('orders').update({
+                    'status': 'failed',
+                    'updated_at': datetime.utcnow().isoformat()
+                }).eq('id', order_id).execute()
+
+        return Response(status=200)
+
+    except Exception as e:
+        logging.error(f"Webhook Error: {e}")
+        return Response(status=200)
+
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=port, debug=False)
