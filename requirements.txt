@@ -16,3 +16,5 @@ python-dotenv
 pytz
 requests
 supabase
+PyJWT
+pandas
