@@ -11,7 +11,7 @@ import pytz
 import hmac
 import hashlib
 import jwt
-from flask import Flask, jsonify, request, g, Response, send_file
+from flask import Flask, jsonify, request, g, Response, send_file, stream_with_context
 from flask_cors import CORS, cross_origin
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -285,47 +285,56 @@ def admin_get_gp_catalog():
     return jsonify(catalog)
 
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
-@error_handler
 def admin_download_gp_csv():
     try:
         gp = GamePointService()
-        catalog = gp.get_full_catalog()
+        token = gp.get_token()
         
-        if not catalog:
-            raise Exception("No products found. Check logs for proxy errors.")
+        list_resp = gp._request("product/list", {"token": token})
+        products = list_resp.get('detail', [])
         
-        rows = []
-        for product in catalog:
-            p_name = product['name']
-            p_id = product['id']
-            packages = product.get('packages') or []
+        if not products:
+            return jsonify({"status": "error", "message": "No products found"}), 404
+
+        def generate_csv():
+            yield "Product ID,Product Name,Package ID,Package Name,Cost Price\n"
             
-            for pkg in packages:
-                rows.append({
-                    "Product ID": p_id,
-                    "Product Name": p_name,
-                    "Package ID": pkg.get('id'),
-                    "Package Name": pkg.get('name'),
-                    "Cost Price": pkg.get('price')
-                })
-        
-        if not rows:
-            raise Exception("Catalog fetched but no packages found.")
-            
-        df = pd.DataFrame(rows)
-        output = io.BytesIO()
-        df.to_csv(output, index=False)
-        output.seek(0)
-        
-        return send_file(
-            output,
+            for p in products:
+                try:
+                    detail_resp = gp._request("product/detail", {"token": token, "productid": p['id']})
+                    
+                    if detail_resp.get('code') == 200:
+                        p_name = p['name'].replace(',', ' ')
+                        packages = detail_resp.get('package', [])
+                        
+                        for pkg in packages:
+                            row = [
+                                str(p['id']),
+                                p_name,
+                                str(pkg['id']),
+                                pkg['name'].replace(',', ' '),
+                                str(pkg['price'])
+                            ]
+                            yield ",".join(row) + "\n"
+                    
+                    time.sleep(0.05)
+                    
+                except Exception as e:
+                    logging.error(f"Error fetching product {p['id']}: {e}")
+                    continue
+
+        return Response(
+            stream_with_context(generate_csv()),
             mimetype="text/csv",
-            as_attachment=True,
-            download_name=f"gamepoint_catalog_{gp.config['mode']}.csv"
+            headers={
+                "Content-Disposition": f"attachment; filename=gamepoint_catalog_{gp.config['mode']}.csv",
+                "Cache-Control": "no-cache"
+            }
         )
+
     except Exception as e:
-        logging.error(f"CSV Download Failed: {str(e)}", exc_info=True)
-        raise e
+        logging.error(f"CSV Download Failed: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/admin/gamepoint/config', methods=['GET', 'POST'])
 @error_handler
