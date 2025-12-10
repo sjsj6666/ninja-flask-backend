@@ -359,6 +359,21 @@ def admin_gamepoint_config():
         
         for key, val in data.items():
             if key in allowed_keys:
+                if key == 'gamepoint_proxy_url' and val and '@' in val:
+                    try:
+                        if '://' not in val: val = 'http://' + val
+                        scheme_split = val.split('://')
+                        scheme = scheme_split[0]
+                        remainder = scheme_split[1]
+                        if '@' in remainder:
+                            creds, host_part = remainder.rsplit('@', 1)
+                            if ':' in creds:
+                                user, password = creds.split(':', 1)
+                                safe_password = quote_plus(password)
+                                val = f"{scheme}://{user}:{safe_password}@{host_part}"
+                    except Exception:
+                        pass
+                
                 updates.append({'key': key, 'value': val})
         
         if updates:
@@ -402,20 +417,30 @@ def check_game_id(game_slug, uid, server_id):
         if server_id:
             inputs["input2"] = server_id
         
+        # NOTE: Validate first to check if ID exists in GamePoint
         try:
             supplier_pid = game_res.data.get('supplier_pid') 
             if not supplier_pid:
                 return jsonify({"status": "error", "message": "Game config missing supplier PID"}), 500
                 
             resp = gp.validate_id(supplier_pid, inputs)
-            return jsonify({
-                "status": "success",
-                "username": "Validated User",
-                "roles": [],
-                "validation_token": resp.get('validation_token')
-            })
+            
+            # If GamePoint says OK (200), we return success to UI
+            # IMPORTANT: The token returned here expires in 30s.
+            # We do NOT return it to frontend because it will expire before payment finishes.
+            # We regenerate it in the webhook.
+            
+            if resp.get('code') == 200:
+                return jsonify({
+                    "status": "success",
+                    "username": "Validated User", # GP often doesn't return name in validate
+                    "roles": []
+                })
+            else:
+                 return jsonify({"status": "error", "message": resp.get('message', 'Invalid ID')}), 400
+                 
         except Exception:
-            return jsonify({"status": "error", "message": "Invalid ID or Server"}), 400
+            return jsonify({"status": "error", "message": "Validation Error"}), 400
 
     if game_slug == "ragnarok-origin":
         result = check_ro_origin_razer_api(uid, server_id)
@@ -548,11 +573,14 @@ def hitpay_webhook_handler():
                             if order.get('server_region'):
                                 inputs["input2"] = order.get('server_region')
                                 
+                            # 1. Validate AGAIN to get fresh token (expires 30s)
                             val_resp = gp_api.validate_id(gp_prod_id, inputs)
                             val_token = val_resp.get('validation_token')
                             
                             if val_token:
                                 merchant_ref = f"{order_id[:8]}-{int(time.time())}"
+                                
+                                # 2. Create Order immediately
                                 create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
                                 
                                 if create_resp.get('code') in [100, 101]:
