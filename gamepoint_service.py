@@ -19,6 +19,7 @@ class GamePointService:
         )
         self.config = self._load_config()
 
+        # Switch URL based on Admin Panel setting
         if self.config['mode'] == 'live':
             self.base_url = "https://api.gamepointclub.net"
             self.partner_id = self.config['partner_id_live']
@@ -103,6 +104,10 @@ class GamePointService:
                     raise ExternalAPIError("Proxy Authentication Failed (407). Check DB credentials.", service_name="AlibabaProxy")
                 raise ExternalAPIError(f"Invalid response from Supplier (Status {response.status_code})", service_name="GamePoint")
             
+            # API Error Handling
+            # 200 = Success (General)
+            # 100 = Purchase Successful (Order/Create)
+            # 101 = Purchase Pending (Order/Create)
             if resp_json.get('code') not in [100, 101, 200]:
                 logger.error(f"GamePoint API Error: {resp_json}")
                 raise ExternalAPIError(
@@ -142,50 +147,45 @@ class GamePointService:
 
     def get_full_catalog(self):
         token = self.get_token()
-        
         try:
             list_resp = self._request("product/list", {"token": token})
             products = list_resp.get('detail', [])
         except Exception as e:
             logger.error(f"Failed to fetch product list: {e}")
             return []
-        
-        full_catalog = []
-        
-        for p in products:
-            try:
-                time.sleep(0.2)
-                detail_resp = self._request("product/detail", {"token": token, "productid": p['id']})
-                
-                if detail_resp.get('code') == 200:
-                    p_data = {
-                        "id": p['id'],
-                        "name": p['name'],
-                        "fields": detail_resp.get('fields', []),
-                        "packages": detail_resp.get('package', [])
-                    }
-                    full_catalog.append(p_data)
-            except Exception as e:
-                logger.warning(f"Failed to fetch detail for {p.get('name', 'Unknown')}: {e}")
-                continue
-                
-        return full_catalog
+        return products
 
+    # --- IMPLEMENTING ORDER/VALIDATE ---
     def validate_id(self, product_id, inputs):
+        """
+        Validates User ID / Zone ID.
+        Output: Returns full response containing 'validation_token'.
+        NOTE: validation_token expires in 30 seconds.
+        """
         token = self.get_token()
+        
+        # Ensure productid is integer
         payload = {
             "token": token,
             "productid": int(product_id),
-            "fields": inputs
+            "fields": inputs # inputs = {"input1": "12345", "input2": "1234"}
         }
+        
         return self._request("order/validate", payload)
 
+    # --- IMPLEMENTING ORDER/CREATE ---
     def create_order(self, package_id, validation_token, merchant_code):
+        """
+        Executes the purchase using the token from validate_id.
+        """
         token = self.get_token()
+        
         payload = {
             "token": token,
             "packageid": int(package_id),
             "validate_token": validation_token,
             "merchantcode": merchant_code
         }
+        
+        # Returns: { code: 100/101, message: "...", referenceno: "..." }
         return self._request("order/create", payload)
