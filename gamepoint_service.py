@@ -1,5 +1,3 @@
-# gamepoint_service.py
-
 import os
 import time
 import json
@@ -8,21 +6,19 @@ import requests
 import logging
 import certifi
 from supabase import create_client
-from redis_cache import cache  # Using your existing Redis cache
+from redis_cache import cache
 from error_handler import ExternalAPIError, AppError
 
 logger = logging.getLogger(__name__)
 
 class GamePointService:
     def __init__(self):
-        # 1. Connect to Supabase to get dynamic settings
         self.supabase = create_client(
             os.environ.get('SUPABASE_URL'), 
             os.environ.get('SUPABASE_SERVICE_KEY')
         )
         self.config = self._load_config()
 
-        # 2. Set Base URL based on mode
         if self.config['mode'] == 'live':
             self.base_url = "https://api.gamepointclub.net"
             self.partner_id = self.config['partner_id_live']
@@ -32,16 +28,15 @@ class GamePointService:
             self.partner_id = self.config['partner_id_sandbox']
             self.secret_key = self.config['secret_key_sandbox']
 
-        # 3. Configure Proxy (Alibaba Cloud)
         self.proxies = None
         if self.config['proxy_url']:
+            proxy_url = self.config['proxy_url'].strip()
             self.proxies = {
-                "http": self.config['proxy_url'],
-                "https": self.config['proxy_url']
+                "http": proxy_url,
+                "https": proxy_url
             }
 
     def _load_config(self):
-        """Fetches active configuration from Supabase Settings."""
         keys = [
             'gamepoint_mode', 
             'gamepoint_partner_id_sandbox', 'gamepoint_secret_key_sandbox',
@@ -65,18 +60,12 @@ class GamePointService:
             raise AppError("Configuration Error")
 
     def _generate_payload(self, data):
-        """Encrypts data using HMAC SHA-256 JWT."""
         payload = data.copy()
         payload['timestamp'] = int(time.time())
-        
-        # JWT Encode
         token = jwt.encode(payload, self.secret_key, algorithm='HS256')
-        
-        # GamePoint expects: {"payload": "jwt_token_string"}
         return json.dumps({"payload": token})
 
     def _request(self, endpoint, data):
-        """Sends request to GamePoint with Proxy and Partner ID Header."""
         url = f"{self.base_url}/{endpoint}"
         body = self._generate_payload(data)
         
@@ -103,7 +92,6 @@ class GamePointService:
                 logger.error(f"GamePoint Non-JSON Response: {response.text}")
                 raise ExternalAPIError("Invalid response from Supplier", service_name="GamePoint")
             
-            # Check for API-level errors (Code 200, 100, 101 are usually success/pending)
             if resp_json.get('code') not in [100, 101, 200]:
                 logger.error(f"GamePoint API Error: {resp_json}")
                 raise ExternalAPIError(
@@ -118,10 +106,6 @@ class GamePointService:
             raise ExternalAPIError("Failed to connect to GamePoint Supplier", service_name="GamePoint")
 
     def get_token(self):
-        """
-        Gets the Daily Token. 
-        Cached in Redis because it expires daily at 00:00 UTC+8.
-        """
         cache_key = f"gamepoint_token_{self.config['mode']}"
         cached_token = cache.get(cache_key)
         
@@ -132,26 +116,22 @@ class GamePointService:
         token = response.get('token')
         
         if token:
-            # Cache for 1 hour
             cache.set(cache_key, token, expire_seconds=3600)
             return token
         else:
             raise ExternalAPIError("Failed to retrieve GamePoint Token", service_name="GamePoint")
 
     def check_balance(self):
-        """Returns the merchant balance."""
         token = self.get_token()
         response = self._request("merchant/balance", {"token": token})
         return response.get('balance')
 
     def get_full_catalog(self):
-        """Fetches product list for Admin Panel."""
         token = self.get_token()
         list_resp = self._request("product/list", {"token": token})
         products = list_resp.get('detail', [])
         
         full_catalog = []
-        # Limiting to first 10 for safety/speed if running purely as test, remove slice for full sync
         for p in products:
             try:
                 detail_resp = self._request("product/detail", {"token": token, "productid": p['id']})
@@ -163,7 +143,7 @@ class GamePointService:
                         "packages": detail_resp.get('package', [])
                     }
                     full_catalog.append(p_data)
-                time.sleep(0.1) # Rate limit protection
+                time.sleep(0.1)
             except Exception as e:
                 logger.warning(f"Failed to fetch detail for {p['name']}: {e}")
                 continue
@@ -171,21 +151,15 @@ class GamePointService:
         return full_catalog
 
     def validate_id(self, product_id, inputs):
-        """
-        Validates User ID / Zone ID.
-        inputs: {'input1': 'userid', 'input2': 'zoneid'}
-        """
         token = self.get_token()
         payload = {
             "token": token,
             "productid": int(product_id),
             "fields": inputs
         }
-        # GamePoint returns a 'validation_token' valid for 30s
         return self._request("order/validate", payload)
 
     def create_order(self, package_id, validation_token, merchant_code):
-        """Executes the purchase."""
         token = self.get_token()
         payload = {
             "token": token,
@@ -193,5 +167,4 @@ class GamePointService:
             "validate_token": validation_token,
             "merchantcode": merchant_code
         }
-        # 100 = Success, 101 = Pending
         return self._request("order/create", payload)
