@@ -142,13 +142,21 @@ class GamePointService:
 
     def get_full_catalog(self):
         token = self.get_token()
-        list_resp = self._request("product/list", {"token": token})
-        products = list_resp.get('detail', [])
+        
+        try:
+            list_resp = self._request("product/list", {"token": token})
+            products = list_resp.get('detail', [])
+        except Exception as e:
+            logger.error(f"Failed to fetch product list: {e}")
+            return []
         
         full_catalog = []
+        
         for p in products:
             try:
+                time.sleep(0.2)
                 detail_resp = self._request("product/detail", {"token": token, "productid": p['id']})
+                
                 if detail_resp.get('code') == 200:
                     p_data = {
                         "id": p['id'],
@@ -157,9 +165,8 @@ class GamePointService:
                         "packages": detail_resp.get('package', [])
                     }
                     full_catalog.append(p_data)
-                time.sleep(0.1)
             except Exception as e:
-                logger.warning(f"Failed to fetch detail for {p['name']}: {e}")
+                logger.warning(f"Failed to fetch detail for {p.get('name', 'Unknown')}: {e}")
                 continue
                 
         return full_catalog
