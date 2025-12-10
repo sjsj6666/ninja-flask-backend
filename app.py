@@ -22,6 +22,8 @@ import random
 import pandas as pd
 import io
 from i18n import i18n, gettext as _
+from gamepoint_service import GamePointService
+from error_handler import error_handler, log_execution_time
 
 app = Flask(__name__)
 
@@ -81,121 +83,6 @@ def get_hitpay_config():
             'url': 'https://api.sandbox.hit-pay.com/v1/payment-requests',
             'key': settings.get('hitpay_api_key_sandbox'),
             'salt': settings.get('hitpay_salt_sandbox')
-        }
-
-class GamePointAPI:
-    def __init__(self):
-        settings = get_settings_from_db(['gamepoint_mode', 'gamepoint_partner_id', 'gamepoint_secret_key'])
-        self.mode = settings.get('gamepoint_mode', 'sandbox')
-        self.partner_id = settings.get('gamepoint_partner_id')
-        self.secret_key = settings.get('gamepoint_secret_key')
-        
-        if self.mode == 'live':
-            self.base_url = "https://api.gamepointclub.net"
-        else:
-            self.base_url = "https://sandbox.gamepointclub.net"
-            
-        self.headers = {
-            'Content-Type': 'application/json',
-            'partnerid': self.partner_id
-        }
-
-    def _generate_payload(self, data_dict):
-        data_dict['timestamp'] = int(time.time())
-        token = jwt.encode(data_dict, self.secret_key, algorithm='HS256')
-        return json.dumps({"payload": token})
-
-    def _make_request(self, endpoint, payload_data):
-        url = f"{self.base_url}/{endpoint}"
-        body = self._generate_payload(payload_data)
-        try:
-            response = requests.post(
-                url, 
-                data=body, 
-                headers=self.headers, 
-                proxies=PROXIES, 
-                timeout=20,
-                verify=certifi.where()
-            )
-            return response.json()
-        except Exception as e:
-            logging.error(f"GamePoint Request Error: {e}")
-            return None
-
-    def get_token(self):
-        resp = self._make_request("merchant/token", {})
-        if resp and resp.get('code') == 200:
-            return resp.get('token')
-        return None
-
-    def get_full_catalog(self):
-        token = self.get_token()
-        if not token: return []
-        
-        list_resp = self._make_request("product/list", {"token": token})
-        if not list_resp or list_resp.get('code') != 200: return []
-        
-        products = list_resp.get('detail', [])
-        full_catalog = []
-        
-        for p in products:
-            p_id = p['id']
-            detail_resp = self._make_request("product/detail", {"token": token, "productid": p_id})
-            if detail_resp and detail_resp.get('code') == 200:
-                p_data = {
-                    "id": p_id,
-                    "name": p['name'],
-                    "fields": detail_resp.get('fields', []),
-                    "packages": detail_resp.get('package', [])
-                }
-                full_catalog.append(p_data)
-        return full_catalog
-
-    def place_order(self, gp_product_id, gp_package_id, user_id, zone_id=None, server_id=None):
-        token = self.get_token()
-        if not token:
-            return {"status": "error", "message": "Failed to authenticate with GamePoint."}
-
-        fields = {"input1": user_id}
-        if zone_id:
-            fields["input2"] = zone_id
-        elif server_id:
-            fields["input2"] = server_id
-
-        validate_payload = {
-            "token": token,
-            "productid": gp_product_id,
-            "fields": fields
-        }
-
-        val_resp = self._make_request("order/validate", validate_payload)
-        
-        if not val_resp or val_resp.get('code') != 200:
-            return {"status": "error", "message": f"GP Validation Failed: {val_resp.get('message')}"}
-
-        validation_token = val_resp.get('validation_token')
-        merchant_ref = f"GV-{int(time.time())}-{random.randint(1000,9999)}"
-        
-        create_payload = {
-            "token": token,
-            "packageid": gp_package_id,
-            "validate_token": validation_token,
-            "merchantcode": merchant_ref
-        }
-
-        create_resp = self._make_request("order/create", create_payload)
-        code = create_resp.get('code')
-        
-        if code == 100 or code == 101:
-            return {
-                "status": "success", 
-                "supplier_ref": create_resp.get('referenceno'),
-                "message": create_resp.get('message')
-            }
-        
-        return {
-            "status": "error", 
-            "message": f"GP Order Failed {code}: {create_resp.get('message')}"
         }
 
 BASE_URL = "https://www.gameuniverse.co"
@@ -391,14 +278,16 @@ def health_check():
     return jsonify({"status": "healthy"}), 200
 
 @app.route('/api/admin/gamepoint/catalog', methods=['GET'])
+@error_handler
 def admin_get_gp_catalog():
-    gp = GamePointAPI()
+    gp = GamePointService()
     catalog = gp.get_full_catalog()
     return jsonify(catalog)
 
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
+@error_handler
 def admin_download_gp_csv():
-    gp = GamePointAPI()
+    gp = GamePointService()
     catalog = gp.get_full_catalog()
     
     rows = []
@@ -423,14 +312,81 @@ def admin_download_gp_csv():
         output,
         mimetype="text/csv",
         as_attachment=True,
-        download_name="gamepoint_products.csv"
+        download_name=f"gamepoint_catalog_{gp.config['mode']}.csv"
     )
+
+@app.route('/admin/gamepoint/config', methods=['GET', 'POST'])
+@error_handler
+def admin_gamepoint_config():
+    if request.method == 'POST':
+        data = request.get_json()
+        updates = []
+        allowed_keys = [
+            'gamepoint_mode', 
+            'gamepoint_partner_id_sandbox', 'gamepoint_secret_key_sandbox',
+            'gamepoint_partner_id_live', 'gamepoint_secret_key_live'
+        ]
+        
+        for key, val in data.items():
+            if key in allowed_keys:
+                updates.append({'key': key, 'value': val})
+        
+        if updates:
+            supabase.table('settings').upsert(updates).execute()
+            from redis_cache import cache
+            cache.delete(f"gamepoint_token_{data.get('gamepoint_mode', 'sandbox')}")
+            
+        return jsonify({"status": "success", "message": "Settings updated"})
+
+    response = supabase.table('settings').select('key,value').ilike('key', 'gamepoint%').execute()
+    settings = {item['key']: item['value'] for item in response.data}
+    
+    for k in ['gamepoint_secret_key_live', 'gamepoint_secret_key_sandbox']:
+        if settings.get(k):
+            settings[k] = "********"
+            
+    return jsonify({"status": "success", "data": settings})
+
+@app.route('/admin/gamepoint/balance', methods=['GET'])
+@error_handler
+def admin_gamepoint_balance():
+    gp = GamePointService()
+    balance = gp.check_balance()
+    return jsonify({
+        "status": "success", 
+        "mode": gp.config['mode'], 
+        "balance": balance
+    })
 
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
 @limiter.limit("10/minute")
+@error_handler
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": _("user_id_required")}), 400
+    
+    game_res = supabase.table('games').select('*').eq('game_key', game_slug).single().execute()
+    if game_res.data and game_res.data.get('supplier') == 'gamepoint':
+        gp = GamePointService()
+        inputs = {"input1": uid}
+        if server_id:
+            inputs["input2"] = server_id
+        
+        try:
+            supplier_pid = game_res.data.get('supplier_pid') 
+            if not supplier_pid:
+                return jsonify({"status": "error", "message": "Game config missing supplier PID"}), 500
+                
+            resp = gp.validate_id(supplier_pid, inputs)
+            return jsonify({
+                "status": "success",
+                "username": "Validated User",
+                "roles": [],
+                "validation_token": resp.get('validation_token')
+            })
+        except Exception:
+            return jsonify({"status": "error", "message": "Invalid ID or Server"}), 400
+
     if game_slug == "ragnarok-origin":
         result = check_ro_origin_razer_api(uid, server_id)
         status_code = 200 if result.get("status") == "success" else 400
@@ -552,21 +508,31 @@ def hitpay_webhook_handler():
                 
                 if order and order.get('order_items'):
                     product = order['order_items'][0]['products']
-                    gp_prod_id = product.get('gp_product_id')
-                    gp_pack_id = product.get('gp_package_id')
+                    gp_prod_id = product.get('gamepoint_product_id')
+                    gp_pack_id = product.get('gamepoint_package_id')
 
                     if gp_prod_id and gp_pack_id:
-                        gp_api = GamePointAPI()
-                        result = gp_api.place_order(
-                            gp_product_id=gp_prod_id,
-                            gp_package_id=gp_pack_id,
-                            user_id=order.get('game_uid'),
-                            zone_id=order.get('server_region')
-                        )
-
-                        if result['status'] == 'success':
-                            supabase.table('orders').update({'status': 'completed', 'supplier_ref': result.get('supplier_ref')}).eq('id', order_id).execute()
-                        else:
+                        try:
+                            gp_api = GamePointService()
+                            inputs = {"input1": order.get('game_uid')}
+                            if order.get('server_region'):
+                                inputs["input2"] = order.get('server_region')
+                                
+                            val_resp = gp_api.validate_id(gp_prod_id, inputs)
+                            val_token = val_resp.get('validation_token')
+                            
+                            if val_token:
+                                merchant_ref = f"{order_id[:8]}-{int(time.time())}"
+                                create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
+                                
+                                if create_resp.get('code') in [100, 101]:
+                                    supabase.table('orders').update({'status': 'completed', 'supplier_ref': create_resp.get('referenceno')}).eq('id', order_id).execute()
+                                else:
+                                    supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
+                            else:
+                                supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
+                        except Exception as e:
+                            logging.error(f"GamePoint Fulfillment Failed: {e}")
                             supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
 
             elif status == 'failed':
