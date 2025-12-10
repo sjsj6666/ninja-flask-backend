@@ -30,6 +30,7 @@ class GamePointService:
 
         self.proxies = None
         if self.config['proxy_url']:
+            # FIX: Strip whitespace that might have been pasted in
             proxy_url = self.config['proxy_url'].strip()
             self.proxies = {
                 "http": proxy_url,
@@ -71,12 +72,15 @@ class GamePointService:
         
         headers = {
             'Content-Type': 'application/json',
-            'partnerid': self.partner_id
+            'partnerid': self.partner_id,
+            # Some proxies require a User-Agent
+            'User-Agent': 'GameVault/1.0'
         }
 
         try:
             logger.info(f"GamePoint Request [{self.config['mode']}]: {endpoint}")
             
+            # Request with specific timeout settings
             response = requests.post(
                 url, 
                 data=body, 
@@ -86,11 +90,15 @@ class GamePointService:
                 verify=certifi.where()
             )
             
+            # Handle non-JSON responses (often from Proxy errors)
             try:
                 resp_json = response.json()
             except json.JSONDecodeError:
-                logger.error(f"GamePoint Non-JSON Response: {response.text}")
-                raise ExternalAPIError("Invalid response from Supplier", service_name="GamePoint")
+                logger.error(f"GamePoint Non-JSON Response (Status {response.status_code}): {response.text[:200]}")
+                # If status is 407, throw specific error
+                if response.status_code == 407:
+                    raise ExternalAPIError("Proxy Authentication Failed (407). Check DB credentials.", service_name="AlibabaProxy")
+                raise ExternalAPIError(f"Invalid response from Supplier (Status {response.status_code})", service_name="GamePoint")
             
             if resp_json.get('code') not in [100, 101, 200]:
                 logger.error(f"GamePoint API Error: {resp_json}")
@@ -101,6 +109,9 @@ class GamePointService:
                 
             return resp_json
 
+        except requests.exceptions.ProxyError as e:
+            logger.error(f"Proxy Connection Failed: {str(e)}")
+            raise ExternalAPIError("Proxy Connection Failed (407). Password might contain special chars.", service_name="AlibabaProxy")
         except requests.RequestException as e:
             logger.error(f"Network Error connecting to GamePoint: {str(e)}")
             raise ExternalAPIError("Failed to connect to GamePoint Supplier", service_name="GamePoint")
