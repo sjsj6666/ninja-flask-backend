@@ -11,6 +11,7 @@ import pytz
 import hmac
 import hashlib
 import jwt
+import concurrent.futures
 from flask import Flask, jsonify, request, g, Response, send_file, stream_with_context
 from flask_cors import CORS, cross_origin
 from flask_limiter import Limiter
@@ -296,18 +297,31 @@ def admin_download_gp_csv():
         if not products:
             return jsonify({"status": "error", "message": "No products found"}), 404
 
+        def fetch_detail_safe(product):
+            try:
+                detail_resp = gp._request("product/detail", {"token": token, "productid": product['id']})
+                if detail_resp.get('code') == 200:
+                    return {
+                        "parent": product,
+                        "packages": detail_resp.get('package', [])
+                    }
+            except Exception as e:
+                logging.error(f"Error fetching product {product['id']}: {e}")
+            return None
+
         def generate_csv():
+            yield u'\ufeff' 
             yield "Product ID,Product Name,Package ID,Package Name,Cost Price\n"
             
-            for p in products:
-                try:
-                    detail_resp = gp._request("product/detail", {"token": token, "productid": p['id']})
-                    
-                    if detail_resp.get('code') == 200:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(fetch_detail_safe, p): p for p in products}
+                
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    if result:
+                        p = result['parent']
                         p_name = p['name'].replace(',', ' ')
-                        packages = detail_resp.get('package', [])
-                        
-                        for pkg in packages:
+                        for pkg in result['packages']:
                             row = [
                                 str(p['id']),
                                 p_name,
@@ -316,12 +330,6 @@ def admin_download_gp_csv():
                                 str(pkg['price'])
                             ]
                             yield ",".join(row) + "\n"
-                    
-                    time.sleep(0.05)
-                    
-                except Exception as e:
-                    logging.error(f"Error fetching product {p['id']}: {e}")
-                    continue
 
         return Response(
             stream_with_context(generate_csv()),
@@ -351,21 +359,6 @@ def admin_gamepoint_config():
         
         for key, val in data.items():
             if key in allowed_keys:
-                if key == 'gamepoint_proxy_url' and val and '@' in val:
-                    try:
-                        if '://' not in val: val = 'http://' + val
-                        scheme_split = val.split('://')
-                        scheme = scheme_split[0]
-                        remainder = scheme_split[1]
-                        if '@' in remainder:
-                            creds, host_part = remainder.rsplit('@', 1)
-                            if ':' in creds:
-                                user, password = creds.split(':', 1)
-                                safe_password = quote_plus(password)
-                                val = f"{scheme}://{user}:{safe_password}@{host_part}"
-                    except Exception:
-                        pass
-                
                 updates.append({'key': key, 'value': val})
         
         if updates:
