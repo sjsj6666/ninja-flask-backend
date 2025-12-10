@@ -17,7 +17,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from supabase import create_client, Client
 from datetime import datetime, timedelta
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urlparse, quote_plus
 import random
 import pandas as pd
 import io
@@ -287,33 +287,45 @@ def admin_get_gp_catalog():
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
 @error_handler
 def admin_download_gp_csv():
-    gp = GamePointService()
-    catalog = gp.get_full_catalog()
-    
-    rows = []
-    for product in catalog:
-        p_name = product['name']
-        p_id = product['id']
-        for pkg in product['packages']:
-            rows.append({
-                "Product ID": p_id,
-                "Product Name": p_name,
-                "Package ID": pkg['id'],
-                "Package Name": pkg['name'],
-                "Cost Price": pkg['price']
-            })
+    try:
+        gp = GamePointService()
+        catalog = gp.get_full_catalog()
+        
+        if not catalog:
+            raise Exception("No products found. Check logs for proxy errors.")
+        
+        rows = []
+        for product in catalog:
+            p_name = product['name']
+            p_id = product['id']
+            packages = product.get('packages') or []
             
-    df = pd.DataFrame(rows)
-    output = io.BytesIO()
-    df.to_csv(output, index=False)
-    output.seek(0)
-    
-    return send_file(
-        output,
-        mimetype="text/csv",
-        as_attachment=True,
-        download_name=f"gamepoint_catalog_{gp.config['mode']}.csv"
-    )
+            for pkg in packages:
+                rows.append({
+                    "Product ID": p_id,
+                    "Product Name": p_name,
+                    "Package ID": pkg.get('id'),
+                    "Package Name": pkg.get('name'),
+                    "Cost Price": pkg.get('price')
+                })
+        
+        if not rows:
+            raise Exception("Catalog fetched but no packages found.")
+            
+        df = pd.DataFrame(rows)
+        output = io.BytesIO()
+        df.to_csv(output, index=False)
+        output.seek(0)
+        
+        return send_file(
+            output,
+            mimetype="text/csv",
+            as_attachment=True,
+            download_name=f"gamepoint_catalog_{gp.config['mode']}.csv"
+        )
+    except Exception as e:
+        logging.error(f"CSV Download Failed: {str(e)}", exc_info=True)
+        raise e
 
 @app.route('/admin/gamepoint/config', methods=['GET', 'POST'])
 @error_handler
@@ -324,14 +336,29 @@ def admin_gamepoint_config():
         allowed_keys = [
             'gamepoint_mode', 
             'gamepoint_partner_id_sandbox', 'gamepoint_secret_key_sandbox',
-            'gamepoint_partner_id_live', 'gamepoint_secret_key_live'
+            'gamepoint_partner_id_live', 'gamepoint_secret_key_live',
+            'gamepoint_proxy_url'
         ]
         
         for key, val in data.items():
             if key in allowed_keys:
+                if key == 'gamepoint_proxy_url' and val and '@' in val:
+                    try:
+                        if '://' not in val: val = 'http://' + val
+                        scheme_split = val.split('://')
+                        scheme = scheme_split[0]
+                        remainder = scheme_split[1]
+                        if '@' in remainder:
+                            creds, host_part = remainder.rsplit('@', 1)
+                            if ':' in creds:
+                                user, password = creds.split(':', 1)
+                                safe_password = quote_plus(password)
+                                val = f"{scheme}://{user}:{safe_password}@{host_part}"
+                    except Exception:
+                        pass
+                
                 updates.append({'key': key, 'value': val})
         
-        # FIX: Explicitly specify conflict column to avoid DB error
         if updates:
             supabase.table('settings').upsert(updates, on_conflict='key').execute()
             from redis_cache import cache
@@ -342,7 +369,7 @@ def admin_gamepoint_config():
     response = supabase.table('settings').select('key,value').ilike('key', 'gamepoint%').execute()
     settings = {item['key']: item['value'] for item in response.data}
     
-    for k in ['gamepoint_secret_key_live', 'gamepoint_secret_key_sandbox']:
+    for k in ['gamepoint_secret_key_live', 'gamepoint_secret_key_sandbox', 'gamepoint_proxy_url']:
         if settings.get(k):
             settings[k] = "********"
             
