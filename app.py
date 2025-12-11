@@ -386,21 +386,6 @@ def admin_gamepoint_config():
         
         for key, val in data.items():
             if key in allowed_keys:
-                if key == 'gamepoint_proxy_url' and val and '@' in val:
-                    try:
-                        if '://' not in val: val = 'http://' + val
-                        scheme_split = val.split('://')
-                        scheme = scheme_split[0]
-                        remainder = scheme_split[1]
-                        if '@' in remainder:
-                            creds, host_part = remainder.rsplit('@', 1)
-                            if ':' in creds:
-                                user, password = creds.split(':', 1)
-                                safe_password = quote_plus(password)
-                                val = f"{scheme}://{user}:{safe_password}@{host_part}"
-                    except Exception:
-                        pass
-                
                 updates.append({'key': key, 'value': val})
         
         if updates:
@@ -605,7 +590,11 @@ def hitpay_webhook_handler():
                                 if create_resp.get('code') in [100, 101]:
                                     supabase.table('orders').update({'status': 'completed', 'supplier_ref': create_resp.get('referenceno')}).eq('id', order_id).execute()
                                 else:
-                                    supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
+                                    error_msg = create_resp.get('message', 'Unknown Supplier Error')
+                                    supabase.table('orders').update({
+                                        'status': 'manual_review',
+                                        'notes': f"Supplier Failed: {error_msg}"
+                                    }).eq('id', order_id).execute()
                             else:
                                 supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
                         except Exception as e:
