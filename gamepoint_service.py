@@ -10,8 +10,6 @@ from error_handler import ExternalAPIError, AppError
 
 logger = logging.getLogger(__name__)
 
-# Simple in-memory cache replacement for Redis
-# Stores token like: { 'sandbox': {'token': 'abc', 'expires': 1234567890} }
 _token_cache = {}
 
 class GamePointService:
@@ -94,7 +92,7 @@ class GamePointService:
                 data=body, 
                 headers=headers, 
                 proxies=self.proxies, 
-                timeout=30,
+                timeout=20,
                 verify=certifi.where()
             )
             
@@ -126,18 +124,15 @@ class GamePointService:
         mode = self.config['mode']
         current_time = time.time()
         
-        # Check in-memory cache
         if mode in _token_cache:
             cached_data = _token_cache[mode]
             if cached_data['expires'] > current_time:
                 return cached_data['token']
 
-        # Fetch new token
         response = self._request("merchant/token", {})
         token = response.get('token')
         
         if token:
-            # Cache for 1 hour (3600 seconds)
             _token_cache[mode] = {
                 'token': token,
                 'expires': current_time + 3600
