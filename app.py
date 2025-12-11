@@ -283,7 +283,6 @@ def health_check():
 def admin_get_gp_catalog():
     gp = GamePointService()
     token = gp.get_token()
-    
     try:
         list_resp = gp._request("product/list", {"token": token})
         products = list_resp.get('detail', [])
@@ -292,7 +291,6 @@ def admin_get_gp_catalog():
         return jsonify([])
 
     full_catalog = []
-
     def fetch_detail_safe(product):
         try:
             detail_resp = gp._request("product/detail", {"token": token, "productid": product['id']})
@@ -309,7 +307,6 @@ def admin_get_gp_catalog():
             result = future.result()
             if result:
                 full_catalog.append(result)
-    
     return jsonify(full_catalog)
 
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
@@ -317,10 +314,8 @@ def admin_download_gp_csv():
     try:
         gp = GamePointService()
         token = gp.get_token()
-        
         list_resp = gp._request("product/list", {"token": token})
         products = list_resp.get('detail', [])
-        
         if not products:
             return jsonify({"status": "error", "message": "No products found"}), 404
 
@@ -328,10 +323,7 @@ def admin_download_gp_csv():
             try:
                 detail_resp = gp._request("product/detail", {"token": token, "productid": product['id']})
                 if detail_resp.get('code') == 200:
-                    return {
-                        "parent": product,
-                        "packages": detail_resp.get('package', [])
-                    }
+                    return { "parent": product, "packages": detail_resp.get('package', []) }
             except Exception as e:
                 logging.error(f"Error fetching product {product['id']}: {e}")
             return None
@@ -339,33 +331,18 @@ def admin_download_gp_csv():
         def generate_csv():
             yield u'\ufeff' 
             yield "Product ID,Product Name,Package ID,Package Name,Cost Price\n"
-            
             with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
                 futures = {executor.submit(fetch_detail_safe, p): p for p in products}
-                
                 for future in concurrent.futures.as_completed(futures):
                     result = future.result()
                     if result:
                         p = result['parent']
                         p_name = p['name'].replace(',', ' ')
                         for pkg in result['packages']:
-                            row = [
-                                str(p['id']),
-                                p_name,
-                                str(pkg['id']),
-                                pkg['name'].replace(',', ' '),
-                                str(pkg['price'])
-                            ]
+                            row = [str(p['id']), p_name, str(pkg['id']), pkg['name'].replace(',', ' '), str(pkg['price'])]
                             yield ",".join(row) + "\n"
 
-        return Response(
-            stream_with_context(generate_csv()),
-            mimetype="text/csv",
-            headers={
-                "Content-Disposition": f"attachment; filename=gamepoint_catalog_{gp.config['mode']}.csv",
-                "Cache-Control": "no-cache"
-            }
-        )
+        return Response(stream_with_context(generate_csv()), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename=gamepoint_catalog_{gp.config['mode']}.csv", "Cache-Control": "no-cache"})
 
     except Exception as e:
         logging.error(f"CSV Download Failed: {str(e)}")
@@ -377,31 +354,20 @@ def admin_gamepoint_config():
     if request.method == 'POST':
         data = request.get_json()
         updates = []
-        allowed_keys = [
-            'gamepoint_mode', 
-            'gamepoint_partner_id_sandbox', 'gamepoint_secret_key_sandbox',
-            'gamepoint_partner_id_live', 'gamepoint_secret_key_live',
-            'gamepoint_proxy_url'
-        ]
-        
+        allowed_keys = ['gamepoint_mode', 'gamepoint_partner_id_sandbox', 'gamepoint_secret_key_sandbox', 'gamepoint_partner_id_live', 'gamepoint_secret_key_live', 'gamepoint_proxy_url']
         for key, val in data.items():
             if key in allowed_keys:
                 updates.append({'key': key, 'value': val})
-        
         if updates:
             supabase.table('settings').upsert(updates, on_conflict='key').execute()
-            from gamepoint_service import _token_cache
-            _token_cache.clear()
-            
+            from redis_cache import cache
+            cache.delete(f"gamepoint_token_{data.get('gamepoint_mode', 'sandbox')}")
         return jsonify({"status": "success", "message": "Settings updated"})
 
     response = supabase.table('settings').select('key,value').ilike('key', 'gamepoint%').execute()
     settings = {item['key']: item['value'] for item in response.data}
-    
     for k in ['gamepoint_secret_key_live', 'gamepoint_secret_key_sandbox', 'gamepoint_proxy_url']:
-        if settings.get(k):
-            settings[k] = "********"
-            
+        if settings.get(k): settings[k] = "********"
     return jsonify({"status": "success", "data": settings})
 
 @app.route('/admin/gamepoint/balance', methods=['GET'])
@@ -409,11 +375,7 @@ def admin_gamepoint_config():
 def admin_gamepoint_balance():
     gp = GamePointService()
     balance = gp.check_balance()
-    return jsonify({
-        "status": "success", 
-        "mode": gp.config['mode'], 
-        "balance": balance
-    })
+    return jsonify({"status": "success", "mode": gp.config['mode'], "balance": balance})
 
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
@@ -426,26 +388,15 @@ def check_game_id(game_slug, uid, server_id):
     if game_res.data and game_res.data.get('supplier') == 'gamepoint':
         gp = GamePointService()
         inputs = {"input1": uid}
-        if server_id:
-            inputs["input2"] = server_id
-        
+        if server_id: inputs["input2"] = server_id
         try:
             supplier_pid = game_res.data.get('supplier_pid') 
-            if not supplier_pid:
-                return jsonify({"status": "error", "message": "Game config missing supplier PID"}), 500
-                
+            if not supplier_pid: return jsonify({"status": "error", "message": "Game config missing supplier PID"}), 500
             resp = gp.validate_id(supplier_pid, inputs)
-            
             if resp.get('code') == 200:
-                return jsonify({
-                    "status": "success",
-                    "username": "Validated User",
-                    "roles": [],
-                    "validation_token": resp.get('validation_token')
-                })
+                return jsonify({"status": "success", "username": "Validated User", "roles": [], "validation_token": resp.get('validation_token')})
             else:
                  return jsonify({"status": "error", "message": resp.get('message', 'Invalid ID')}), 400
-                 
         except Exception:
             return jsonify({"status": "error", "message": "Validation Error"}), 400
 
@@ -570,36 +521,86 @@ def hitpay_webhook_handler():
                 
                 if order and order.get('order_items'):
                     product = order['order_items'][0]['products']
-                    gp_prod_id = product.get('gamepoint_product_id')
-                    gp_pack_id = product.get('gamepoint_package_id')
-
-                    if gp_prod_id and gp_pack_id:
-                        try:
-                            gp_api = GamePointService()
-                            inputs = {"input1": order.get('game_uid')}
-                            if order.get('server_region'):
-                                inputs["input2"] = order.get('server_region')
-                                
-                            val_resp = gp_api.validate_id(gp_prod_id, inputs)
-                            val_token = val_resp.get('validation_token')
+                    gp_api = GamePointService()
+                    
+                    # --- NEW BUNDLING LOGIC START ---
+                    supplier_config = product.get('supplier_config')
+                    
+                    if supplier_config:
+                        # Handle Bundles (Multiple packages)
+                        all_success = True
+                        failed_items = []
+                        supplier_refs = []
+                        
+                        inputs = {"input1": order.get('game_uid')}
+                        if order.get('server_region'): inputs["input2"] = order.get('server_region')
+                        
+                        for item in supplier_config:
+                            gp_prod_id = item.get('gameId')
+                            gp_pack_id = item.get('packageId')
                             
-                            if val_token:
-                                merchant_ref = f"{order_id[:8]}-{int(time.time())}"
-                                create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
+                            try:
+                                # Validation needed for EACH item as tokens are one-time use per order in some cases
+                                # or at least expire quickly. Safest to validate before each create.
+                                val_resp = gp_api.validate_id(gp_prod_id, inputs)
+                                val_token = val_resp.get('validation_token')
                                 
-                                if create_resp.get('code') in [100, 101]:
-                                    supabase.table('orders').update({'status': 'completed', 'supplier_ref': create_resp.get('referenceno')}).eq('id', order_id).execute()
+                                if val_token:
+                                    merchant_ref = f"{order_id[:8]}-{int(time.time())}-{random.randint(100,999)}"
+                                    create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
+                                    
+                                    if create_resp.get('code') in [100, 101]:
+                                        supplier_refs.append(create_resp.get('referenceno'))
+                                    else:
+                                        all_success = False
+                                        failed_items.append(f"{item.get('name')} (Err: {create_resp.get('message')})")
                                 else:
-                                    error_msg = create_resp.get('message', 'Unknown Supplier Error')
-                                    supabase.table('orders').update({
-                                        'status': 'manual_review',
-                                        'notes': f"Supplier Failed: {error_msg}"
-                                    }).eq('id', order_id).execute()
-                            else:
+                                    all_success = False
+                                    failed_items.append(f"{item.get('name')} (Validation Failed)")
+                            except Exception as e:
+                                all_success = False
+                                failed_items.append(f"{item.get('name')} (Exception: {str(e)})")
+                        
+                        if all_success:
+                            supabase.table('orders').update({
+                                'status': 'completed', 
+                                'supplier_ref': ', '.join(supplier_refs)
+                            }).eq('id', order_id).execute()
+                        else:
+                            supabase.table('orders').update({
+                                'status': 'manual_review',
+                                'notes': f"Partial/Full Failure: {'; '.join(failed_items)}",
+                                'supplier_ref': ', '.join(supplier_refs)
+                            }).eq('id', order_id).execute()
+                    
+                    # --- LEGACY SINGLE LOGIC ---
+                    else:
+                        gp_prod_id = product.get('gamepoint_product_id')
+                        gp_pack_id = product.get('gamepoint_package_id')
+
+                        if gp_prod_id and gp_pack_id:
+                            try:
+                                inputs = {"input1": order.get('game_uid')}
+                                if order.get('server_region'): inputs["input2"] = order.get('server_region')
+                                
+                                val_resp = gp_api.validate_id(gp_prod_id, inputs)
+                                val_token = val_resp.get('validation_token')
+                                
+                                if val_token:
+                                    merchant_ref = f"{order_id[:8]}-{int(time.time())}"
+                                    create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
+                                    
+                                    if create_resp.get('code') in [100, 101]:
+                                        supabase.table('orders').update({'status': 'completed', 'supplier_ref': create_resp.get('referenceno')}).eq('id', order_id).execute()
+                                    else:
+                                        error_msg = create_resp.get('message', 'Unknown Supplier Error')
+                                        supabase.table('orders').update({'status': 'manual_review', 'notes': f"Supplier Failed: {error_msg}"}).eq('id', order_id).execute()
+                                else:
+                                    supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
+                            except Exception as e:
+                                logging.error(f"GamePoint Fulfillment Failed: {e}")
                                 supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
-                        except Exception as e:
-                            logging.error(f"GamePoint Fulfillment Failed: {e}")
-                            supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
+                    # --- END LOGIC ---
 
             elif status == 'failed':
                 supabase.table('orders').update({'status': 'failed', 'updated_at': datetime.utcnow().isoformat()}).eq('id', order_id).execute()
