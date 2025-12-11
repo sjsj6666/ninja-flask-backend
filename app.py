@@ -390,8 +390,8 @@ def admin_gamepoint_config():
         
         if updates:
             supabase.table('settings').upsert(updates, on_conflict='key').execute()
-            from redis_cache import cache
-            cache.delete(f"gamepoint_token_{data.get('gamepoint_mode', 'sandbox')}")
+            from gamepoint_service import _token_cache
+            _token_cache.clear()
             
         return jsonify({"status": "success", "message": "Settings updated"})
 
