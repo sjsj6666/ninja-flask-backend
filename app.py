@@ -309,6 +309,25 @@ def admin_get_gp_catalog():
                 full_catalog.append(result)
     return jsonify(full_catalog)
 
+@app.route('/api/admin/gamepoint/list', methods=['GET'])
+@error_handler
+def admin_get_gp_game_list():
+    gp = GamePointService()
+    token = gp.get_token()
+    list_resp = gp._request("product/list", {"token": token})
+    products = list_resp.get('detail', [])
+    return jsonify(products)
+
+@app.route('/api/admin/gamepoint/detail/<int:product_id>', methods=['GET'])
+@error_handler
+def admin_get_gp_game_detail(product_id):
+    gp = GamePointService()
+    token = gp.get_token()
+    detail_resp = gp._request("product/detail", {"token": token, "productid": product_id})
+    if detail_resp.get('code') == 200:
+        return jsonify(detail_resp.get('package', []))
+    return jsonify([])
+
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
 def admin_download_gp_csv():
     try:
@@ -523,11 +542,9 @@ def hitpay_webhook_handler():
                     product = order['order_items'][0]['products']
                     gp_api = GamePointService()
                     
-                    # --- NEW BUNDLING LOGIC START ---
                     supplier_config = product.get('supplier_config')
                     
                     if supplier_config:
-                        # Handle Bundles (Multiple packages)
                         all_success = True
                         failed_items = []
                         supplier_refs = []
@@ -540,8 +557,6 @@ def hitpay_webhook_handler():
                             gp_pack_id = item.get('packageId')
                             
                             try:
-                                # Validation needed for EACH item as tokens are one-time use per order in some cases
-                                # or at least expire quickly. Safest to validate before each create.
                                 val_resp = gp_api.validate_id(gp_prod_id, inputs)
                                 val_token = val_resp.get('validation_token')
                                 
@@ -573,7 +588,6 @@ def hitpay_webhook_handler():
                                 'supplier_ref': ', '.join(supplier_refs)
                             }).eq('id', order_id).execute()
                     
-                    # --- LEGACY SINGLE LOGIC ---
                     else:
                         gp_prod_id = product.get('gamepoint_product_id')
                         gp_pack_id = product.get('gamepoint_package_id')
@@ -600,7 +614,6 @@ def hitpay_webhook_handler():
                             except Exception as e:
                                 logging.error(f"GamePoint Fulfillment Failed: {e}")
                                 supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
-                    # --- END LOGIC ---
 
             elif status == 'failed':
                 supabase.table('orders').update({'status': 'failed', 'updated_at': datetime.utcnow().isoformat()}).eq('id', order_id).execute()
