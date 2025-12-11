@@ -18,7 +18,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from supabase import create_client, Client
 from datetime import datetime, timedelta
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlencode, urlparse, quote_plus
 import random
 import pandas as pd
 import io
@@ -282,8 +282,35 @@ def health_check():
 @error_handler
 def admin_get_gp_catalog():
     gp = GamePointService()
-    catalog = gp.get_full_catalog()
-    return jsonify(catalog)
+    token = gp.get_token()
+    
+    try:
+        list_resp = gp._request("product/list", {"token": token})
+        products = list_resp.get('detail', [])
+    except Exception as e:
+        logging.error(f"Failed to fetch product list: {e}")
+        return jsonify([])
+
+    full_catalog = []
+
+    def fetch_detail_safe(product):
+        try:
+            detail_resp = gp._request("product/detail", {"token": token, "productid": product['id']})
+            if detail_resp.get('code') == 200:
+                product['packages'] = detail_resp.get('package', [])
+                return product
+        except Exception as e:
+            logging.error(f"Error fetching product {product['id']}: {e}")
+        return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(fetch_detail_safe, p): p for p in products}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                full_catalog.append(result)
+    
+    return jsonify(full_catalog)
 
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
 def admin_download_gp_csv():
@@ -359,7 +386,21 @@ def admin_gamepoint_config():
         
         for key, val in data.items():
             if key in allowed_keys:
-                # RAW SAVE: Removed the logic that modified proxy URLs
+                if key == 'gamepoint_proxy_url' and val and '@' in val:
+                    try:
+                        if '://' not in val: val = 'http://' + val
+                        scheme_split = val.split('://')
+                        scheme = scheme_split[0]
+                        remainder = scheme_split[1]
+                        if '@' in remainder:
+                            creds, host_part = remainder.rsplit('@', 1)
+                            if ':' in creds:
+                                user, password = creds.split(':', 1)
+                                safe_password = quote_plus(password)
+                                val = f"{scheme}://{user}:{safe_password}@{host_part}"
+                    except Exception:
+                        pass
+                
                 updates.append({'key': key, 'value': val})
         
         if updates:
