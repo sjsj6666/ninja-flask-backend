@@ -291,11 +291,14 @@ def admin_get_gp_catalog():
         return jsonify([])
 
     full_catalog = []
+    
     def fetch_detail_safe(product):
         try:
             detail_resp = gp._request("product/detail", {"token": token, "productid": product['id']})
             if detail_resp.get('code') == 200:
                 product['packages'] = detail_resp.get('package', [])
+                product['fields'] = detail_resp.get('fields', [])
+                product['server'] = detail_resp.get('server', [])
                 return product
         except Exception as e:
             logging.error(f"Error fetching product {product['id']}: {e}")
