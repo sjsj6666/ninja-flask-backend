@@ -184,10 +184,26 @@ def check_spacegaming_api(game_id, uid):
 
 def check_netease_api(game_path, server_id, role_id):
     try:
-        params = {"deviceid": "1", "traceid": str(uuid.uuid4()), "timestamp": int(time.time()*1000), "roleid": role_id, "client_type": "gameclub"}
-        response = requests.get(f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role", params=params, headers=NETEASE_HEADERS, timeout=10, proxies=PROXIES)
+        # Improved: Use random UUID for deviceid and traceid to look authentic
+        params = {
+            "deviceid": str(uuid.uuid4()), 
+            "traceid": str(uuid.uuid4()), 
+            "timestamp": int(time.time()*1000), 
+            "roleid": role_id, 
+            "client_type": "gameclub"
+        }
+        
+        # Set specific Referer for the game
+        headers = NETEASE_HEADERS.copy()
+        headers["Referer"] = f"https://pay.neteasegames.com/{game_path}/topup"
+        
+        url = f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role"
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10, proxies=PROXIES)
         data = response.json()
-        if data.get("code") == "0000": return {"status": "success", "username": data.get("data", {}).get("rolename")}
+        
+        if data.get("code") == "0000": 
+            return {"status": "success", "username": data.get("data", {}).get("rolename")}
         return {"status": "error", "message": "Invalid ID"}
     except Exception: return {"status": "error", "message": "API Error"}
 
@@ -406,22 +422,7 @@ def admin_gamepoint_balance():
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": _("user_id_required")}), 400
     
-    game_res = supabase.table('games').select('*').eq('game_key', game_slug).single().execute()
-    if game_res.data and game_res.data.get('supplier') == 'gamepoint':
-        gp = GamePointService()
-        inputs = {"input1": uid}
-        if server_id: inputs["input2"] = server_id
-        try:
-            supplier_pid = game_res.data.get('supplier_pid') 
-            if not supplier_pid: return jsonify({"status": "error", "message": "Game config missing supplier PID"}), 500
-            resp = gp.validate_id(supplier_pid, inputs)
-            if resp.get('code') == 200:
-                return jsonify({"status": "success", "username": "Validated User", "roles": [], "validation_token": resp.get('validation_token')})
-            else:
-                 return jsonify({"status": "error", "message": resp.get('message', 'Invalid ID')}), 400
-        except Exception:
-            return jsonify({"status": "error", "message": "Validation Error"}), 400
-
+    # Check for Specific Handlers FIRST (to override GamePoint generic validation if available)
     if game_slug == "ragnarok-origin":
         result = check_ro_origin_razer_api(uid, server_id)
         status_code = 200 if result.get("status") == "success" else 400
@@ -452,6 +453,8 @@ def check_game_id(game_slug, uid, server_id):
         "ragnarok-x-next-generation": lambda: check_nuverse_api("3402", uid),
         "snowbreak-containment-zone": lambda: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(server_id)),
         "delta-force": lambda: check_garena_api("100151", uid),
+        # Ace Racer specific handler using NetEase directly
+        "ace-racer": lambda: check_netease_api("aceracer", server_id, uid)
     }
     
     handler = handlers.get(game_slug)
@@ -460,10 +463,26 @@ def check_game_id(game_slug, uid, server_id):
         if result.get("status") == "success" and "roles" in result and len(result["roles"]) == 1:
             result["username"] = result["roles"][0].get("roleName")
             del result["roles"]
-    else:
-        result = {"status": "error", "message": _("validation_not_configured", game=game_slug)}
+        return jsonify(result), 200 if result.get("status") == "success" else 400
     
-    return jsonify(result), 200 if result.get("status") == "success" else 400
+    # Fallback: GamePoint Default Logic
+    game_res = supabase.table('games').select('*').eq('game_key', game_slug).single().execute()
+    if game_res.data and game_res.data.get('supplier') == 'gamepoint':
+        gp = GamePointService()
+        inputs = {"input1": uid}
+        if server_id: inputs["input2"] = server_id
+        try:
+            supplier_pid = game_res.data.get('supplier_pid') 
+            if not supplier_pid: return jsonify({"status": "error", "message": "Game config missing supplier PID"}), 500
+            resp = gp.validate_id(supplier_pid, inputs)
+            if resp.get('code') == 200:
+                return jsonify({"status": "success", "username": "Validated User", "roles": [], "validation_token": resp.get('validation_token')})
+            else:
+                 return jsonify({"status": "error", "message": resp.get('message', 'Invalid ID')}), 400
+        except Exception:
+            return jsonify({"status": "error", "message": "Validation Error"}), 400
+
+    return jsonify({"status": "error", "message": _("validation_not_configured", game=game_slug)}), 400
 
 @app.route('/ro-origin/get-servers', methods=['GET', 'OPTIONS'])
 def handle_ro_origin_get_servers():
