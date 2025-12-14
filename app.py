@@ -27,7 +27,9 @@ from i18n import i18n, gettext as _
 # Ensure gamepoint_service.py exists in the same folder
 from gamepoint_service import GamePointService
 from error_handler import error_handler, log_execution_time
-from redis_cache import cache  # Import Redis cache
+from redis_cache import cache
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 app = Flask(__name__)
 
@@ -341,22 +343,31 @@ def admin_get_gp_catalog():
 
     full_catalog = []
     
-    # 2. Use a Session for Connection Pooling (Huge Speedup)
+    # 2. Use a Session for Connection Pooling with Expanded Pool Size
     session = requests.Session()
+    
+    # --- IMPORTANT: Configure Adapter with Large Pool Size ---
+    adapter = HTTPAdapter(
+        pool_connections=30,  # Allow 30 connections to different hosts
+        pool_maxsize=30,      # Allow 30 connections to the SAME host
+        max_retries=Retry(total=3, backoff_factor=0.5) # Retry on simple failures
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    # ---------------------------------------------------------
+
     session.headers.update({
         'Content-Type': 'application/json',
         'partnerid': gp.partner_id,
         'User-Agent': 'GameVault/1.0'
     })
     
-    # Pre-calculate proxies and base URL to avoid overhead in loop
     proxies = gp.proxies
     base_url = gp.base_url
     secret_key = gp.secret_key
 
     def fetch_detail_optimized(product):
         try:
-            # Manually constructing request to bypass overhead of gp._request
             payload = {"token": token, "productid": product['id'], "timestamp": int(time.time())}
             encoded_payload = jwt.encode(payload, secret_key, algorithm='HS256')
             body = json.dumps({"payload": encoded_payload})
@@ -380,7 +391,7 @@ def admin_get_gp_catalog():
             logging.error(f"Error fetching product {product['id']}: {e}")
         return None
 
-    # 3. Increase Workers
+    # 3. Use 30 Workers (now matches the pool size)
     with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
         futures = {executor.submit(fetch_detail_optimized, p): p for p in products}
         for future in concurrent.futures.as_completed(futures):
