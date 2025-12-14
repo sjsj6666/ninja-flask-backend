@@ -12,6 +12,7 @@ import hmac
 import hashlib
 import jwt
 import concurrent.futures
+from functools import wraps
 from flask import Flask, jsonify, request, g, Response, send_file, stream_with_context
 from flask_cors import CORS, cross_origin
 from flask_limiter import Limiter
@@ -23,12 +24,13 @@ import random
 import pandas as pd
 import io
 from i18n import i18n, gettext as _
+# Ensure gamepoint_service.py exists in the same folder
 from gamepoint_service import GamePointService
 from error_handler import error_handler, log_execution_time
+from redis_cache import cache  # Import Redis cache
 
 app = Flask(__name__)
 
-# Rate Limiter Configuration
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -36,22 +38,18 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-# CORS Configuration
 allowed_origins_str = os.environ.get('ALLOWED_ORIGINS', "http://127.0.0.1:5173,http://localhost:5173,https://www.gameuniverse.co")
 allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
 CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
 
-# Logging Setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 10000))
 
-# Environment Variables
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 BACKEND_URL = os.environ.get('RENDER_EXTERNAL_URL')
 PROXY_URL = os.environ.get('PROXY_URL')
 
-# Alibaba Cloud Proxy Setup
 PROXIES = {
     "http": PROXY_URL,
     "https": PROXY_URL
@@ -62,9 +60,53 @@ if not all([SUPABASE_URL, SUPABASE_SERVICE_KEY, BACKEND_URL]):
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+# --- Validation Constants ---
+BASE_URL = "https://www.gameuniverse.co"
+SMILE_ONE_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "Origin": "https://www.smile.one", "Cookie": os.environ.get("SMILE_ONE_COOKIE") }
+BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
+BIGO_NATIVE_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/" }
+SPACEGAMING_VALIDATE_URL = "https://spacegaming.sg/wp-json/endpoint/validate_v2"
+SPACEGAMING_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://spacegaming.sg", "Referer": "https://spacegaming.sg/" }
+NETEASE_BASE_URL = "https://pay.neteasegames.com/gameclub"
+NETEASE_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+RAZER_BASE_URL = "https://gold.razer.com/api/ext/custom"
+RAZER_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+NUVERSE_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
+NUVERSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
+ROM_XD_VALIDATE_URL = "https://xdsdk-intnl-6.xd.com/product/v1/query/game/role"
+ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "application/json", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
+RAZER_RO_ORIGIN_VALIDATE_URL = "https://gold.razer.com/api/ext/custom/gravity-ragnarok-origin/users"
+RAZER_RO_ORIGIN_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "application/json", "Referer": "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin" }
+GAMINGNP_VALIDATE_URL = "https://gaming.com.np/ajaxCheckId"
+GAMINGNP_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "*/*", "Content-Type": "application/x-www-form-urlencoded", "Origin": "https://gaming.com.np", "X-Requested-With": "XMLHttpRequest" }
+GARENA_LOGIN_URL = "https://shop.garena.sg/api/auth/player_id_login"
+GARENA_ROLES_URL = "https://shop.garena.sg/api/shop/apps/roles"
+GARENA_HEADERS = { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
+
 @app.before_request
 def before_request():
     g.language = i18n.get_user_language()
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        auth_header = request.headers.get('Authorization')
+        if not auth_header:
+            return jsonify({"status": "error", "message": "Missing Authorization Header"}), 401
+        
+        try:
+            token = auth_header.split(" ")[1]
+            user = supabase.auth.get_user(token)
+            user_id = user.user.id
+            
+            profile = supabase.table('profiles').select('role').eq('id', user_id).single().execute()
+            if profile.data and profile.data['role'] in ['admin', 'owner']:
+                return f(*args, **kwargs)
+            else:
+                return jsonify({"status": "error", "message": "Unauthorized"}), 403
+        except Exception:
+            return jsonify({"status": "error", "message": "Invalid Token"}), 401
+    return decorated_function
 
 def get_settings_from_db(keys):
     try:
@@ -91,31 +133,7 @@ def get_hitpay_config():
             'salt': settings.get('hitpay_salt_sandbox')
         }
 
-# --- Validation Constants ---
-BASE_URL = "https://www.gameuniverse.co"
-SMILE_ONE_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "Origin": "https://www.smile.one", "Cookie": os.environ.get("SMILE_ONE_COOKIE") }
-BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
-BIGO_NATIVE_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/" }
-SPACEGAMING_VALIDATE_URL = "https://spacegaming.sg/wp-json/endpoint/validate_v2"
-SPACEGAMING_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "*/*", "Content-Type": "application/json", "Origin": "https://spacegaming.sg", "Referer": "https://spacegaming.sg/" }
-NETEASE_BASE_URL = "https://pay.neteasegames.com/gameclub"
-NETEASE_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-RAZER_BASE_URL = "https://gold.razer.com/api/ext/custom"
-RAZER_HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
-NUVERSE_VALIDATE_URL = "https://pay.nvsgames.com/web/payment/validate"
-NUVERSE_HEADERS = {"User-Agent": "Mozilla/5.0"}
-ROM_XD_VALIDATE_URL = "https://xdsdk-intnl-6.xd.com/product/v1/query/game/role"
-ROM_XD_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "application/json", "Origin": "https://webpay.xd.com", "Referer": "https://webpay.xd.com/" }
-RAZER_RO_ORIGIN_VALIDATE_URL = "https://gold.razer.com/api/ext/custom/gravity-ragnarok-origin/users"
-RAZER_RO_ORIGIN_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "application/json", "Referer": "https://gold.razer.com/my/en/gold/catalog/ragnarok-origin" }
-GAMINGNP_VALIDATE_URL = "https://gaming.com.np/ajaxCheckId"
-GAMINGNP_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "*/*", "Content-Type": "application/x-www-form-urlencoded", "Origin": "https://gaming.com.np", "X-Requested-With": "XMLHttpRequest" }
-GARENA_LOGIN_URL = "https://shop.garena.sg/api/auth/player_id_login"
-GARENA_ROLES_URL = "https://shop.garena.sg/api/shop/apps/roles"
-GARENA_HEADERS = { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
-
-# --- Validation Functions ---
-
+# --- Validation Logic ---
 def perform_ml_check(user_id, zone_id):
     try:
         api_url = "https://cekidml.caliph.dev/api/validasi"
@@ -303,10 +321,17 @@ def health_check():
     return jsonify({"status": "healthy"}), 200
 
 @app.route('/api/admin/gamepoint/catalog', methods=['GET'])
+@admin_required
 @error_handler
 def admin_get_gp_catalog():
+    # 1. Check Cache First
+    cached_catalog = cache.get("admin_gp_full_catalog")
+    if cached_catalog:
+        return jsonify(cached_catalog)
+
     gp = GamePointService()
     token = gp.get_token()
+    
     try:
         list_resp = gp._request("product/list", {"token": token})
         products = list_resp.get('detail', [])
@@ -316,27 +341,60 @@ def admin_get_gp_catalog():
 
     full_catalog = []
     
-    def fetch_detail_safe(product):
+    # 2. Use a Session for Connection Pooling (Huge Speedup)
+    session = requests.Session()
+    session.headers.update({
+        'Content-Type': 'application/json',
+        'partnerid': gp.partner_id,
+        'User-Agent': 'GameVault/1.0'
+    })
+    
+    # Pre-calculate proxies and base URL to avoid overhead in loop
+    proxies = gp.proxies
+    base_url = gp.base_url
+    secret_key = gp.secret_key
+
+    def fetch_detail_optimized(product):
         try:
-            detail_resp = gp._request("product/detail", {"token": token, "productid": product['id']})
-            if detail_resp.get('code') == 200:
-                product['packages'] = detail_resp.get('package', [])
-                product['fields'] = detail_resp.get('fields', [])
-                product['server'] = detail_resp.get('server', [])
+            # Manually constructing request to bypass overhead of gp._request
+            payload = {"token": token, "productid": product['id'], "timestamp": int(time.time())}
+            encoded_payload = jwt.encode(payload, secret_key, algorithm='HS256')
+            body = json.dumps({"payload": encoded_payload})
+            
+            resp = session.post(
+                f"{base_url}/product/detail", 
+                data=body, 
+                proxies=proxies, 
+                timeout=15,
+                verify=certifi.where()
+            )
+            
+            detail_data = resp.json()
+            
+            if detail_data.get('code') == 200:
+                product['packages'] = detail_data.get('package', [])
+                product['fields'] = detail_data.get('fields', [])
+                product['server'] = detail_data.get('server', [])
                 return product
         except Exception as e:
             logging.error(f"Error fetching product {product['id']}: {e}")
         return None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(fetch_detail_safe, p): p for p in products}
+    # 3. Increase Workers
+    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+        futures = {executor.submit(fetch_detail_optimized, p): p for p in products}
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
             if result:
                 full_catalog.append(result)
+    
+    # 4. Save to Cache for 1 Hour
+    cache.set("admin_gp_full_catalog", full_catalog, expire_seconds=3600)
+    
     return jsonify(full_catalog)
 
 @app.route('/api/admin/gamepoint/list', methods=['GET'])
+@admin_required
 @error_handler
 def admin_get_gp_game_list():
     gp = GamePointService()
@@ -346,6 +404,7 @@ def admin_get_gp_game_list():
     return jsonify(products)
 
 @app.route('/api/admin/gamepoint/detail/<int:product_id>', methods=['GET'])
+@admin_required
 @error_handler
 def admin_get_gp_game_detail(product_id):
     gp = GamePointService()
@@ -356,6 +415,7 @@ def admin_get_gp_game_detail(product_id):
     return jsonify([])
 
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
+@admin_required
 def admin_download_gp_csv():
     try:
         gp = GamePointService()
@@ -395,6 +455,7 @@ def admin_download_gp_csv():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/admin/gamepoint/config', methods=['GET', 'POST'])
+@admin_required
 @error_handler
 def admin_gamepoint_config():
     if request.method == 'POST':
@@ -417,6 +478,7 @@ def admin_gamepoint_config():
     return jsonify({"status": "success", "data": settings})
 
 @app.route('/admin/gamepoint/balance', methods=['GET'])
+@admin_required
 @error_handler
 def admin_gamepoint_balance():
     gp = GamePointService()
@@ -559,26 +621,25 @@ def hitpay_webhook_handler():
         payment_id = form_data.get('payment_id')
 
         if order_id:
-            # --- START DOUBLE DELIVERY FIX (Idempotency) ---
-            # Fetch current status from DB
-            current_order_response = supabase.table('orders').select('status').eq('id', order_id).single().execute()
-            current_order = current_order_response.data
+            # === CRITICAL: Idempotency Check (Prevent Double Delivery) ===
+            try:
+                current_order_response = supabase.table('orders').select('status').eq('id', order_id).single().execute()
+                current_order = current_order_response.data
+                
+                if not current_order:
+                    logging.error(f"Webhook Error: Order {order_id} not found.")
+                    return Response(status=200)
 
-            if not current_order:
-                logging.error(f"Webhook Error: Order {order_id} not found in DB.")
-                return Response(status=200) # Return 200 to acknowledge webhook so HitPay stops retrying
-
-            current_status = current_order.get('status')
-
-            # If order is already in a final or processing state, STOP here.
-            # This prevents double execution if HitPay sends the webhook multiple times.
-            if current_status in ['processing', 'completed', 'failed', 'refunded', 'manual_review']:
-                logging.info(f"Webhook Ignored: Order {order_id} is already in '{current_status}' state.")
-                return Response(status=200)
-            # --- END DOUBLE DELIVERY FIX ---
+                # If status is already final or processing, ignore this webhook to prevent double charging/delivery
+                if current_order.get('status') in ['processing', 'completed', 'failed', 'refunded', 'manual_review']:
+                    logging.info(f"Webhook Ignored: Order {order_id} is already '{current_order.get('status')}'.")
+                    return Response(status=200)
+            except Exception as e:
+                logging.error(f"Error checking order status: {e}")
+                return Response(status=500)
+            # =============================================================
 
             if status == 'completed':
-                # Lock the order immediately to 'processing'
                 supabase.table('orders').update({'status': 'processing', 'payment_id': payment_id}).eq('id', order_id).execute()
                 
                 order_data = supabase.table('orders').select('*, order_items(*, products(*))').eq('id', order_id).single().execute()
