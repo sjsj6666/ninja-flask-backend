@@ -52,7 +52,8 @@ SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 BACKEND_URL = os.environ.get('RENDER_EXTERNAL_URL')
 PROXY_URL = os.environ.get('PROXY_URL')
 
-PROXIES = {
+# Global Proxy Dictionary - Use only when necessary (e.g. rate-limited APIs)
+PROXY_DICT = {
     "http": PROXY_URL,
     "https": PROXY_URL
 } if PROXY_URL else None
@@ -140,7 +141,8 @@ def perform_ml_check(user_id, zone_id):
     try:
         api_url = "https://cekidml.caliph.dev/api/validasi"
         params = {'id': user_id, 'serverid': zone_id}
-        response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7, proxies=PROXIES)
+        # Direct connection for speed
+        response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7, proxies=None)
         if response.status_code == 200:
             data = response.json()
             if data.get("status") == "success" and data.get("result", {}).get("nickname"):
@@ -170,7 +172,8 @@ def check_smile_one_api(game_code, uid, server_id=None):
         params.update({"uid": uid, "sid": server_id, "pid": pid_to_use})
     
     try:
-        response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where(), proxies=PROXIES)
+        # Use direct connection (proxies=None)
+        response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where(), proxies=None)
         if "text/html" in response.headers.get('content-type', ''):
              return {"status": "error", "message": "API Format Error"}
         data = response.json()
@@ -183,7 +186,7 @@ def check_smile_one_api(game_code, uid, server_id=None):
 
 def check_bigo_native_api(uid):
     try:
-        response = requests.get(BIGO_NATIVE_VALIDATE_URL, params={"isFromApp": "0", "bigoId": uid}, headers=BIGO_NATIVE_HEADERS, timeout=10, verify=certifi.where(), proxies=PROXIES)
+        response = requests.get(BIGO_NATIVE_VALIDATE_URL, params={"isFromApp": "0", "bigoId": uid}, headers=BIGO_NATIVE_HEADERS, timeout=10, verify=certifi.where(), proxies=None)
         data = response.json()
         if data.get("result") == 0: return {"status": "success", "username": data.get("data", {}).get("nick_name")}
         return {"status": "error", "message": "Invalid Bigo ID"}
@@ -195,7 +198,8 @@ def check_gamingnp_api(game_code, uid):
     headers = GAMINGNP_HEADERS.copy()
     headers["Referer"] = params[game_code]["url"]
     try:
-        response = requests.post(GAMINGNP_VALIDATE_URL, data={"userid": uid, "game": game_code, "categoryId": params[game_code]["id"]}, headers=headers, timeout=10, proxies=PROXIES)
+        # Keep PROXY_DICT for GamingNP if they rate limit, otherwise change to None
+        response = requests.post(GAMINGNP_VALIDATE_URL, data={"userid": uid, "game": game_code, "categoryId": params[game_code]["id"]}, headers=headers, timeout=10, proxies=PROXY_DICT)
         data = response.json()
         if data.get("success") and data.get("detail", {}).get("valid") == "valid":
             return {"status": "success", "username": data["detail"].get("name")}
@@ -204,7 +208,7 @@ def check_gamingnp_api(game_code, uid):
 
 def check_spacegaming_api(game_id, uid):
     try:
-        response = requests.post(SPACEGAMING_VALIDATE_URL, json={"username": uid, "game_id": game_id}, headers=SPACEGAMING_HEADERS, timeout=10, proxies=PROXIES)
+        response = requests.post(SPACEGAMING_VALIDATE_URL, json={"username": uid, "game_id": game_id}, headers=SPACEGAMING_HEADERS, timeout=10, proxies=None)
         data = response.json()
         if data.get("status") == "true": return {"status": "success", "username": data.get("message").strip()}
         return {"status": "error", "message": "Invalid ID"}
@@ -225,7 +229,8 @@ def check_netease_api(game_path, server_id, role_id):
         
         url = f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role"
         
-        response = requests.get(url, params=params, headers=headers, timeout=10, proxies=PROXIES)
+        # Keep PROXY_DICT for NetEase if required
+        response = requests.get(url, params=params, headers=headers, timeout=10, proxies=PROXY_DICT)
         data = response.json()
         
         if data.get("code") == "0000": 
@@ -240,7 +245,7 @@ def check_razer_hoyoverse_api(api_path, referer, server_map, uid, server_name):
     headers = RAZER_HEADERS.copy()
     headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{referer}"
     try:
-        response = requests.get(url, params={"serverId": sid}, headers=headers, timeout=10, proxies=PROXIES)
+        response = requests.get(url, params={"serverId": sid}, headers=headers, timeout=10, proxies=None)
         data = response.json()
         if response.status_code == 200 and data.get("username"): return {"status": "success", "username": data.get("username")}
         return {"status": "error", "message": "Invalid ID"}
@@ -250,7 +255,7 @@ def check_razer_api(game_path, uid, server_id):
     headers = RAZER_HEADERS.copy()
     headers["Referer"] = f"https://gold.razer.com/my/en/gold/catalog/{game_path.split('/')[-1]}"
     try:
-        response = requests.get(f"{RAZER_BASE_URL}/{game_path}/users/{uid}", params={"serverId": server_id}, headers=headers, timeout=10, proxies=PROXIES)
+        response = requests.get(f"{RAZER_BASE_URL}/{game_path}/users/{uid}", params={"serverId": server_id}, headers=headers, timeout=10, proxies=None)
         data = response.json()
         if response.status_code == 200 and data.get("username"): return {"status": "success", "username": data.get("username")}
         return {"status": "error", "message": "Invalid ID"}
@@ -258,7 +263,7 @@ def check_razer_api(game_path, uid, server_id):
 
 def check_nuverse_api(aid, role_id):
     try:
-        response = requests.get(NUVERSE_VALIDATE_URL, params={"tab": "purchase", "aid": aid, "role_id": role_id}, headers=NUVERSE_HEADERS, timeout=10, proxies=PROXIES)
+        response = requests.get(NUVERSE_VALIDATE_URL, params={"tab": "purchase", "aid": aid, "role_id": role_id}, headers=NUVERSE_HEADERS, timeout=10, proxies=None)
         data = response.json()
         if data.get("code") == 0:
             info = data.get("data", [{}])[0]
@@ -268,7 +273,7 @@ def check_nuverse_api(aid, role_id):
 
 def check_rom_xd_api(role_id):
     try:
-        response = requests.get(ROM_XD_VALIDATE_URL, params={"source": "webpay", "appId": "2079001", "serverId": "50001", "roleId": role_id}, headers=ROM_XD_HEADERS, timeout=10, proxies=PROXIES)
+        response = requests.get(ROM_XD_VALIDATE_URL, params={"source": "webpay", "appId": "2079001", "serverId": "50001", "roleId": role_id}, headers=ROM_XD_HEADERS, timeout=10, proxies=None)
         data = response.json()
         if data.get("code") == 200: return {"status": "success", "username": data.get("data", {}).get("name")}
         return {"status": "error", "message": "Invalid ID"}
@@ -276,7 +281,7 @@ def check_rom_xd_api(role_id):
 
 def check_ro_origin_razer_api(uid, server_id):
     try:
-        response = requests.get(f"{RAZER_RO_ORIGIN_VALIDATE_URL}/{uid}", params={"serverId": server_id}, headers=RAZER_RO_ORIGIN_HEADERS, timeout=10, proxies=PROXIES)
+        response = requests.get(f"{RAZER_RO_ORIGIN_VALIDATE_URL}/{uid}", params={"serverId": server_id}, headers=RAZER_RO_ORIGIN_HEADERS, timeout=10, proxies=None)
         if response.status_code == 200:
             data = response.json()
             if data.get("roles"):
@@ -301,7 +306,8 @@ def get_ro_origin_servers():
 def check_garena_api(app_id, uid):
     with requests.Session() as s:
         s.headers.update(GARENA_HEADERS)
-        if PROXIES: s.proxies.update(PROXIES)
+        # Use proxies only if specifically required for Garena
+        # if PROXIES: s.proxies.update(PROXIES) 
         try:
             s.headers["Referer"] = f"https://shop.garena.sg/?app={app_id}"
             login = s.post(GARENA_LOGIN_URL, json={"app_id": int(app_id), "login_id": uid}, timeout=10)
@@ -326,12 +332,12 @@ def health_check():
 @admin_required
 @error_handler
 def admin_get_gp_catalog():
-    # 1. Check Cache First
     cached_catalog = cache.get("admin_gp_full_catalog")
     if cached_catalog:
         return jsonify(cached_catalog)
 
-    gp = GamePointService()
+    # Pass the global supabase client to GamePointService
+    gp = GamePointService(supabase_client=supabase)
     token = gp.get_token()
     
     try:
@@ -343,18 +349,14 @@ def admin_get_gp_catalog():
 
     full_catalog = []
     
-    # 2. Use a Session for Connection Pooling with Expanded Pool Size
     session = requests.Session()
-    
-    # --- IMPORTANT: Configure Adapter with Large Pool Size ---
     adapter = HTTPAdapter(
-        pool_connections=30,  # Allow 30 connections to different hosts
-        pool_maxsize=30,      # Allow 30 connections to the SAME host
-        max_retries=Retry(total=3, backoff_factor=0.5) # Retry on simple failures
+        pool_connections=30,  
+        pool_maxsize=30,      
+        max_retries=Retry(total=3, backoff_factor=0.5)
     )
     session.mount("https://", adapter)
     session.mount("http://", adapter)
-    # ---------------------------------------------------------
 
     session.headers.update({
         'Content-Type': 'application/json',
@@ -391,7 +393,6 @@ def admin_get_gp_catalog():
             logging.error(f"Error fetching product {product['id']}: {e}")
         return None
 
-    # 3. Use 30 Workers (now matches the pool size)
     with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
         futures = {executor.submit(fetch_detail_optimized, p): p for p in products}
         for future in concurrent.futures.as_completed(futures):
@@ -399,7 +400,6 @@ def admin_get_gp_catalog():
             if result:
                 full_catalog.append(result)
     
-    # 4. Save to Cache for 1 Hour
     cache.set("admin_gp_full_catalog", full_catalog, expire_seconds=3600)
     
     return jsonify(full_catalog)
@@ -408,7 +408,7 @@ def admin_get_gp_catalog():
 @admin_required
 @error_handler
 def admin_get_gp_game_list():
-    gp = GamePointService()
+    gp = GamePointService(supabase_client=supabase)
     token = gp.get_token()
     list_resp = gp._request("product/list", {"token": token})
     products = list_resp.get('detail', [])
@@ -418,7 +418,7 @@ def admin_get_gp_game_list():
 @admin_required
 @error_handler
 def admin_get_gp_game_detail(product_id):
-    gp = GamePointService()
+    gp = GamePointService(supabase_client=supabase)
     token = gp.get_token()
     detail_resp = gp._request("product/detail", {"token": token, "productid": product_id})
     if detail_resp.get('code') == 200:
@@ -429,7 +429,7 @@ def admin_get_gp_game_detail(product_id):
 @admin_required
 def admin_download_gp_csv():
     try:
-        gp = GamePointService()
+        gp = GamePointService(supabase_client=supabase)
         token = gp.get_token()
         list_resp = gp._request("product/list", {"token": token})
         products = list_resp.get('detail', [])
@@ -492,7 +492,7 @@ def admin_gamepoint_config():
 @admin_required
 @error_handler
 def admin_gamepoint_balance():
-    gp = GamePointService()
+    gp = GamePointService(supabase_client=supabase)
     balance = gp.check_balance()
     return jsonify({"status": "success", "mode": gp.config['mode'], "balance": balance})
 
@@ -546,7 +546,7 @@ def check_game_id(game_slug, uid, server_id):
     
     game_res = supabase.table('games').select('*').eq('game_key', game_slug).single().execute()
     if game_res.data and game_res.data.get('supplier') == 'gamepoint':
-        gp = GamePointService()
+        gp = GamePointService(supabase_client=supabase)
         inputs = {"input1": uid}
         if server_id: inputs["input2"] = server_id
         try:
@@ -575,13 +575,32 @@ def handle_ro_origin_get_roles():
 @limiter.limit("10/minute")
 def create_hitpay_payment():
     data = request.get_json()
-    amount = data.get('amount')
+    # SECURE: Do not accept 'amount' from frontend.
     order_id = data.get('order_id')
     redirect_url = data.get('redirect_url')
-    product_name = data.get('product_name', 'GameVault Order')
 
-    if not all([amount, order_id, redirect_url]):
+    if not order_id or not redirect_url:
         return jsonify({'status': 'error', 'message': 'Missing data'}), 400
+
+    # 1. Fetch the REAL amount from the Database
+    try:
+        # Fetch order and ensure it hasn't been paid yet
+        order_res = supabase.table('orders').select('total_amount, status').eq('id', order_id).single().execute()
+        order_data = order_res.data
+
+        if not order_data:
+            return jsonify({'status': 'error', 'message': 'Order not found'}), 404
+        
+        # Security: Prevent paying for an already completed order
+        if order_data['status'] in ['completed', 'processing', 'paid']:
+             return jsonify({'status': 'error', 'message': 'Order already paid'}), 400
+
+        # USE DB AMOUNT, NOT FRONTEND AMOUNT
+        real_amount = float(order_data['total_amount']) 
+        
+    except Exception as e:
+        logging.error(f"DB Error fetching order price: {e}")
+        return jsonify({'status': 'error', 'message': 'Server Error'}), 500
 
     config = get_hitpay_config()
     if not config or not config['key']:
@@ -590,19 +609,19 @@ def create_hitpay_payment():
     try:
         webhook_url = f"{BACKEND_URL}/api/webhook-handler"
         payload = {
-            'amount': float(amount),
+            'amount': real_amount, # SECURE AMOUNT
             'currency': 'SGD',
             'reference_number': order_id,
             'redirect_url': redirect_url,
             'webhook': webhook_url,
-            'purpose': product_name,
+            'purpose': data.get('product_name', 'GameVault Order'),
             'channel': 'api_custom',
             'email': data.get('email', 'customer@example.com'),
             'name': data.get('name', 'GameVault Customer')
         }
         
         headers = {'X-BUSINESS-API-KEY': config['key'], 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
-        response = requests.post(config['url'], headers=headers, json=payload, timeout=15, proxies=PROXIES)
+        response = requests.post(config['url'], headers=headers, json=payload, timeout=15, proxies=None) # HitPay generally doesn't need proxy
         response_data = response.json()
 
         if response.status_code == 201:
@@ -632,33 +651,31 @@ def hitpay_webhook_handler():
         payment_id = form_data.get('payment_id')
 
         if order_id:
-            # === CRITICAL: Idempotency Check (Prevent Double Delivery) ===
-            try:
-                current_order_response = supabase.table('orders').select('status').eq('id', order_id).single().execute()
-                current_order = current_order_response.data
-                
-                if not current_order:
-                    logging.error(f"Webhook Error: Order {order_id} not found.")
-                    return Response(status=200)
-
-                # If status is already final or processing, ignore this webhook to prevent double charging/delivery
-                if current_order.get('status') in ['processing', 'completed', 'failed', 'refunded', 'manual_review']:
-                    logging.info(f"Webhook Ignored: Order {order_id} is already '{current_order.get('status')}'.")
-                    return Response(status=200)
-            except Exception as e:
-                logging.error(f"Error checking order status: {e}")
-                return Response(status=500)
-            # =============================================================
-
             if status == 'completed':
-                supabase.table('orders').update({'status': 'processing', 'payment_id': payment_id}).eq('id', order_id).execute()
-                
+                # === CRITICAL: Atomic Update for Idempotency ===
+                try:
+                    # Update status to 'processing' ONLY IF it is currently 'pending' or 'verifying'
+                    result = supabase.table('orders').update({'status': 'processing', 'payment_id': payment_id})\
+                        .eq('id', order_id)\
+                        .in_('status', ['pending', 'verifying'])\
+                        .execute()
+                    
+                    # If no rows were updated, it means the order was ALREADY processed or doesn't exist
+                    if not result.data or len(result.data) == 0:
+                        logging.info(f"Duplicate Webhook or Invalid Order: Order {order_id} already processed.")
+                        return Response(status=200) # ACK to stop HitPay retries
+                except Exception as e:
+                    logging.error(f"Error locking order {order_id}: {e}")
+                    return Response(status=500) # Retry later
+                # ===============================================
+
+                # Fetch full order details now that we have locked it
                 order_data = supabase.table('orders').select('*, order_items(*, products(*))').eq('id', order_id).single().execute()
                 order = order_data.data
                 
                 if order and order.get('order_items'):
                     product = order['order_items'][0]['products']
-                    gp_api = GamePointService()
+                    gp_api = GamePointService(supabase_client=supabase)
                     
                     supplier_config = product.get('supplier_config')
                     
