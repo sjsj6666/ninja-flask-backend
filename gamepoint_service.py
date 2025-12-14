@@ -13,11 +13,16 @@ logger = logging.getLogger(__name__)
 _token_cache = {}
 
 class GamePointService:
-    def __init__(self):
-        self.supabase = create_client(
-            os.environ.get('SUPABASE_URL'), 
-            os.environ.get('SUPABASE_SERVICE_KEY')
-        )
+    def __init__(self, supabase_client=None):
+        # Optimization: Reuse existing client if provided
+        if supabase_client:
+            self.supabase = supabase_client
+        else:
+            self.supabase = create_client(
+                os.environ.get('SUPABASE_URL'), 
+                os.environ.get('SUPABASE_SERVICE_KEY')
+            )
+            
         self.config = self._load_config()
 
         if self.config['mode'] == 'live':
