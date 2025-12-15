@@ -149,8 +149,15 @@ def perform_ml_check(user_id, zone_id):
 def check_smile_one_api(game_code, uid, server_id=None):
     endpoints = { "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole?product=bloodstrike", "loveanddeepspace": "https://www.smile.one/merchant/loveanddeepspace/checkrole/", "magicchessgogo": "https://www.smile.one/br/merchant/game/checkrole?product=magicchessgogo" }
     pids = {"mobilelegends": "25", "bloodstrike": "20294"}
-    if game_code not in endpoints: return {"status": "error", "message": "Game not configured"}
-    pid_to_use = pids.get(game_code)
+    
+    # Generic endpoint builder for Universal use if game_code not in map
+    target_endpoint = endpoints.get(game_code)
+    if not target_endpoint:
+        # Fallback for dynamic universal mapping where game_code is passed as 'bloodstrike' etc
+        target_endpoint = f"https://www.smile.one/merchant/{game_code}/checkrole"
+
+    pid_to_use = pids.get(game_code, "0") # Default to 0 if unknown
+    
     params = {"checkrole": "1"}
     if game_code == "loveanddeepspace":
         server_sid_map = {"Asia": "81", "America": "82", "Europe": "83"}
@@ -164,10 +171,11 @@ def check_smile_one_api(game_code, uid, server_id=None):
     elif game_code == "magicchessgogo":
         params.update({"uid": uid, "sid": server_id})
     else:
+        # Generic fallback
         params.update({"uid": uid, "sid": server_id, "pid": pid_to_use})
     
     try:
-        response = requests.post(endpoints[game_code], data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where(), proxies=None)
+        response = requests.post(target_endpoint, data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where(), proxies=None)
         if "text/html" in response.headers.get('content-type', ''):
              return {"status": "error", "message": "API Format Error"}
         data = response.json()
@@ -188,11 +196,19 @@ def check_bigo_native_api(uid):
 
 def check_gamingnp_api(game_code, uid):
     params = { "hok": {"id": "3898", "url": "https://gaming.com.np/topup/honor-of-kings"}, "pubgm": {"id": "3920", "url": "https://gaming.com.np/topup/pubg-mobile-global"} }
-    if game_code not in params: return {"status": "error", "message": "Config Error"}
+    
+    # Simple logic for universal handling if not explicitly in map
+    target_id = "0"
+    target_url = "https://gaming.com.np"
+    
+    if game_code in params:
+        target_id = params[game_code]["id"]
+        target_url = params[game_code]["url"]
+    
     headers = GAMINGNP_HEADERS.copy()
-    headers["Referer"] = params[game_code]["url"]
+    headers["Referer"] = target_url
     try:
-        response = requests.post(GAMINGNP_VALIDATE_URL, data={"userid": uid, "game": game_code, "categoryId": params[game_code]["id"]}, headers=headers, timeout=10, proxies=PROXY_DICT)
+        response = requests.post(GAMINGNP_VALIDATE_URL, data={"userid": uid, "game": game_code, "categoryId": target_id}, headers=headers, timeout=10, proxies=PROXY_DICT)
         data = response.json()
         if data.get("success") and data.get("detail", {}).get("valid") == "valid":
             return {"status": "success", "username": data["detail"].get("name")}
@@ -314,25 +330,35 @@ zzz_servers = {"Asia": "prod_gf_jp", "America": "prod_gf_us", "Europe": "prod_gf
 snowbreak_servers = {"Asia": "225", "SEA": "215", "Americas": "235", "Europe": "245"}
 
 VALIDATION_HANDLERS = {
-    "pubgm_global": lambda uid, sid: check_gamingnp_api("pubgm", uid),
-    "genshin_impact": lambda uid, sid: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, uid, sid),
-    "honkai_star_rail": lambda uid, sid: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", "hsr", hsr_servers, uid, sid),
-    "zenless_zone_zero": lambda uid, sid: check_razer_hoyoverse_api("cognosphere-zenless-zone-zero", "zenless-zone-zero", zzz_servers, uid, sid),
-    "arena_breakout": lambda uid, sid: check_spacegaming_api("arena_breakout", uid),
-    "blood_strike": lambda uid, sid: check_smile_one_api("bloodstrike", uid),
-    "love_and_deepspace": lambda uid, sid: check_smile_one_api("loveanddeepspace", uid, sid),
-    "ragnarok_m_classic": lambda uid, sid: check_rom_xd_api(uid),
-    "ragnarok_origin": lambda uid, sid: check_ro_origin_razer_api(uid, sid),
-    "honor_of_kings": lambda uid, sid: check_gamingnp_api("hok", uid),
-    "magic_chess_gogo": lambda uid, sid: check_smile_one_api("magicchessgogo", uid, sid),
-    "bigo_live": lambda uid, sid: check_bigo_native_api(uid),
-    "mobile_legends_global": lambda uid, sid: perform_ml_check(uid, sid),
-    "identity_v": lambda uid, sid: check_netease_api("identityv", {"Asia": "2001", "NA-EU": "2011"}.get(sid), uid),
-    "marvel_rivals": lambda uid, sid: check_netease_api("marvelrivals", "11001", uid),
-    "ragnarok_x_next_gen": lambda uid, sid: check_nuverse_api("3402", uid),
-    "snowbreak": lambda uid, sid: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(sid)),
-    "delta_force": lambda uid, sid: check_garena_api("100151", uid),
-    "ace_racer": lambda uid, sid: check_netease_api("aceracer", sid, uid),
+    # --- UNIVERSAL HANDLERS ---
+    "universal_mlbb": lambda uid, sid, cfg: perform_ml_check(uid, sid),
+    "universal_netease": lambda uid, sid, cfg: check_netease_api(cfg.get('target_id'), sid, uid),
+    "universal_smile_one": lambda uid, sid, cfg: check_smile_one_api(cfg.get('target_id'), uid, sid),
+    "universal_gamingnp": lambda uid, sid, cfg: check_gamingnp_api(cfg.get('target_id'), uid),
+    "universal_spacegaming": lambda uid, sid, cfg: check_spacegaming_api(cfg.get('target_id'), uid),
+    "universal_razer": lambda uid, sid, cfg: check_razer_api(cfg.get('target_id'), uid, sid),
+    
+    # --- LEGACY SPECIFIC HANDLERS (Config is passed but ignored to match signature) ---
+    "pubgm_global": lambda uid, sid, cfg: check_gamingnp_api("pubgm", uid),
+    "genshin_impact": lambda uid, sid, cfg: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, uid, sid),
+    "honkai_star_rail": lambda uid, sid, cfg: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", "hsr", hsr_servers, uid, sid),
+    "zenless_zone_zero": lambda uid, sid, cfg: check_razer_hoyoverse_api("cognosphere-zenless-zone-zero", "zenless-zone-zero", zzz_servers, uid, sid),
+    "arena_breakout": lambda uid, sid, cfg: check_spacegaming_api("arena_breakout", uid),
+    "blood_strike": lambda uid, sid, cfg: check_smile_one_api("bloodstrike", uid),
+    "love_and_deepspace": lambda uid, sid, cfg: check_smile_one_api("loveanddeepspace", uid, sid),
+    "ragnarok_m_classic": lambda uid, sid, cfg: check_rom_xd_api(uid),
+    "ragnarok_origin": lambda uid, sid, cfg: check_ro_origin_razer_api(uid, sid),
+    "honor_of_kings": lambda uid, sid, cfg: check_gamingnp_api("hok", uid),
+    "magic_chess_gogo": lambda uid, sid, cfg: check_smile_one_api("magicchessgogo", uid, sid),
+    "bigo_live": lambda uid, sid, cfg: check_bigo_native_api(uid),
+    "mobile_legends_global": lambda uid, sid, cfg: perform_ml_check(uid, sid),
+    "mobile_legends_brazil": lambda uid, sid, cfg: perform_ml_check(uid, sid),
+    "identity_v": lambda uid, sid, cfg: check_netease_api("identityv", {"Asia": "2001", "NA-EU": "2011"}.get(sid), uid),
+    "marvel_rivals": lambda uid, sid, cfg: check_netease_api("marvelrivals", "11001", uid),
+    "ragnarok_x_next_gen": lambda uid, sid, cfg: check_nuverse_api("3402", uid),
+    "snowbreak": lambda uid, sid, cfg: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(sid)),
+    "delta_force": lambda uid, sid, cfg: check_garena_api("100151", uid),
+    "ace_racer": lambda uid, sid, cfg: check_netease_api("aceracer", sid, uid),
 }
 
 @app.route('/')
@@ -523,14 +549,26 @@ def check_game_id(game_slug, uid, server_id):
         return jsonify(result), status_code
 
     try:
-        game_res = supabase.table('games').select('api_handler, supplier, supplier_pid').eq('game_key', game_slug).single().execute()
+        # Fetch game details including new validation_param column
+        game_res = supabase.table('games').select('api_handler, supplier, supplier_pid, validation_param').eq('game_key', game_slug).single().execute()
         
         if game_res.data:
-            api_handler_key = game_res.data.get('api_handler')
+            game_data = game_res.data
+            api_handler_key = game_data.get('api_handler')
             
             if api_handler_key and api_handler_key in VALIDATION_HANDLERS:
                 handler_func = VALIDATION_HANDLERS[api_handler_key]
-                result = handler_func(uid, server_id)
+                
+                # Determine target_id for universal handlers
+                # Prioritize validation_param, fallback to supplier_pid
+                target_id = game_data.get('validation_param')
+                if not target_id:
+                    target_id = game_data.get('supplier_pid')
+                
+                config_for_handler = { 'target_id': target_id }
+                
+                # Pass 3 arguments: uid, sid, config
+                result = handler_func(uid, server_id, config_for_handler)
                 
                 if result.get("status") == "success" and "roles" in result and len(result["roles"]) == 1:
                     result["username"] = result["roles"][0].get("roleName")
@@ -538,12 +576,12 @@ def check_game_id(game_slug, uid, server_id):
                 
                 return jsonify(result), 200 if result.get("status") == "success" else 400
 
-            if game_res.data.get('supplier') == 'gamepoint':
+            if game_data.get('supplier') == 'gamepoint':
                 gp = GamePointService(supabase_client=supabase)
                 inputs = {"input1": uid}
                 if server_id: inputs["input2"] = server_id
                 
-                supplier_pid = game_res.data.get('supplier_pid') 
+                supplier_pid = game_data.get('supplier_pid') 
                 if not supplier_pid: return jsonify({"status": "error", "message": "Game config missing supplier PID"}), 500
                 
                 resp = gp.validate_id(supplier_pid, inputs)
