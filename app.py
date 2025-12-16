@@ -29,6 +29,7 @@ from error_handler import error_handler, log_execution_time
 from redis_cache import cache
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from email_service import send_order_update
 
 app = Flask(__name__)
 
@@ -150,13 +151,11 @@ def check_smile_one_api(game_code, uid, server_id=None):
     endpoints = { "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole?product=bloodstrike", "loveanddeepspace": "https://www.smile.one/merchant/loveanddeepspace/checkrole/", "magicchessgogo": "https://www.smile.one/br/merchant/game/checkrole?product=magicchessgogo" }
     pids = {"mobilelegends": "25", "bloodstrike": "20294"}
     
-    # Generic endpoint builder for Universal use if game_code not in map
     target_endpoint = endpoints.get(game_code)
     if not target_endpoint:
-        # Fallback for dynamic universal mapping where game_code is passed as 'bloodstrike' etc
         target_endpoint = f"https://www.smile.one/merchant/{game_code}/checkrole"
 
-    pid_to_use = pids.get(game_code, "0") # Default to 0 if unknown
+    pid_to_use = pids.get(game_code, "0")
     
     params = {"checkrole": "1"}
     if game_code == "loveanddeepspace":
@@ -171,7 +170,6 @@ def check_smile_one_api(game_code, uid, server_id=None):
     elif game_code == "magicchessgogo":
         params.update({"uid": uid, "sid": server_id})
     else:
-        # Generic fallback
         params.update({"uid": uid, "sid": server_id, "pid": pid_to_use})
     
     try:
@@ -197,7 +195,6 @@ def check_bigo_native_api(uid):
 def check_gamingnp_api(game_code, uid):
     params = { "hok": {"id": "3898", "url": "https://gaming.com.np/topup/honor-of-kings"}, "pubgm": {"id": "3920", "url": "https://gaming.com.np/topup/pubg-mobile-global"} }
     
-    # Simple logic for universal handling if not explicitly in map
     target_id = "0"
     target_url = "https://gaming.com.np"
     
@@ -330,7 +327,6 @@ zzz_servers = {"Asia": "prod_gf_jp", "America": "prod_gf_us", "Europe": "prod_gf
 snowbreak_servers = {"Asia": "225", "SEA": "215", "Americas": "235", "Europe": "245"}
 
 VALIDATION_HANDLERS = {
-    # --- UNIVERSAL HANDLERS ---
     "universal_mlbb": lambda uid, sid, cfg: perform_ml_check(uid, sid),
     "universal_netease": lambda uid, sid, cfg: check_netease_api(cfg.get('target_id'), sid, uid),
     "universal_smile_one": lambda uid, sid, cfg: check_smile_one_api(cfg.get('target_id'), uid, sid),
@@ -338,7 +334,6 @@ VALIDATION_HANDLERS = {
     "universal_spacegaming": lambda uid, sid, cfg: check_spacegaming_api(cfg.get('target_id'), uid),
     "universal_razer": lambda uid, sid, cfg: check_razer_api(cfg.get('target_id'), uid, sid),
     
-    # --- LEGACY SPECIFIC HANDLERS (Config is passed but ignored to match signature) ---
     "pubgm_global": lambda uid, sid, cfg: check_gamingnp_api("pubgm", uid),
     "genshin_impact": lambda uid, sid, cfg: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, uid, sid),
     "honkai_star_rail": lambda uid, sid, cfg: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", "hsr", hsr_servers, uid, sid),
@@ -549,7 +544,6 @@ def check_game_id(game_slug, uid, server_id):
         return jsonify(result), status_code
 
     try:
-        # Fetch game details including new validation_param column
         game_res = supabase.table('games').select('api_handler, supplier, supplier_pid, validation_param').eq('game_key', game_slug).single().execute()
         
         if game_res.data:
@@ -559,15 +553,12 @@ def check_game_id(game_slug, uid, server_id):
             if api_handler_key and api_handler_key in VALIDATION_HANDLERS:
                 handler_func = VALIDATION_HANDLERS[api_handler_key]
                 
-                # Determine target_id for universal handlers
-                # Prioritize validation_param, fallback to supplier_pid
                 target_id = game_data.get('validation_param')
                 if not target_id:
                     target_id = game_data.get('supplier_pid')
                 
                 config_for_handler = { 'target_id': target_id }
                 
-                # Pass 3 arguments: uid, sid, config
                 result = handler_func(uid, server_id, config_for_handler)
                 
                 if result.get("status") == "success" and "roles" in result and len(result["roles"]) == 1:
@@ -611,6 +602,7 @@ def create_hitpay_payment():
     data = request.get_json()
     order_id = data.get('order_id')
     redirect_url = data.get('redirect_url')
+    email = data.get('email')
 
     if not order_id or not redirect_url:
         return jsonify({'status': 'error', 'message': 'Missing data'}), 400
@@ -626,6 +618,9 @@ def create_hitpay_payment():
              return jsonify({'status': 'error', 'message': 'Order already paid'}), 400
 
         real_amount = float(order_data['total_amount']) 
+        
+        if email:
+            supabase.table('orders').update({'email': email}).eq('id', order_id).execute()
         
     except Exception as e:
         logging.error(f"DB Error fetching order price: {e}")
@@ -645,7 +640,7 @@ def create_hitpay_payment():
             'webhook': webhook_url,
             'purpose': data.get('product_name', 'GameVault Order'),
             'channel': 'api_custom',
-            'email': data.get('email', 'customer@example.com'),
+            'email': email or 'customer@example.com',
             'name': data.get('name', 'GameVault Customer')
         }
         
@@ -694,11 +689,18 @@ def hitpay_webhook_handler():
                     logging.error(f"Error locking order {order_id}: {e}")
                     return Response(status=500)
 
-                order_data = supabase.table('orders').select('*, order_items(*, products(*))').eq('id', order_id).single().execute()
+                order_data = supabase.table('orders').select('*, order_items(*, products(*, games(*)))').eq('id', order_id).single().execute()
                 order = order_data.data
                 
                 if order and order.get('order_items'):
                     product = order['order_items'][0]['products']
+                    game = product.get('games', {})
+                    product_name = product.get('name')
+                    game_name = game.get('name', 'GameVault Product')
+                    
+                    customer_email = order.get('email') or form_data.get('customer_email')
+                    customer_name = order.get('remitter_name') or form_data.get('customer_name')
+
                     gp_api = GamePointService(supabase_client=supabase)
                     
                     supplier_config = product.get('supplier_config')
@@ -740,12 +742,20 @@ def hitpay_webhook_handler():
                                 'status': 'completed', 
                                 'supplier_ref': ', '.join(supplier_refs)
                             }).eq('id', order_id).execute()
+                            
+                            updated_order = order.copy()
+                            updated_order['status'] = 'completed'
+                            send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
                         else:
                             supabase.table('orders').update({
                                 'status': 'manual_review',
                                 'notes': f"Partial/Full Failure: {'; '.join(failed_items)}",
                                 'supplier_ref': ', '.join(supplier_refs)
                             }).eq('id', order_id).execute()
+                            
+                            updated_order = order.copy()
+                            updated_order['status'] = 'manual_review'
+                            send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
                     
                     else:
                         gp_prod_id = product.get('gamepoint_product_id')
@@ -765,17 +775,45 @@ def hitpay_webhook_handler():
                                     
                                     if create_resp.get('code') in [100, 101]:
                                         supabase.table('orders').update({'status': 'completed', 'supplier_ref': create_resp.get('referenceno')}).eq('id', order_id).execute()
+                                        
+                                        updated_order = order.copy()
+                                        updated_order['status'] = 'completed'
+                                        send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
                                     else:
                                         error_msg = create_resp.get('message', 'Unknown Supplier Error')
                                         supabase.table('orders').update({'status': 'manual_review', 'notes': f"Supplier Failed: {error_msg}"}).eq('id', order_id).execute()
+                                        
+                                        updated_order = order.copy()
+                                        updated_order['status'] = 'manual_review'
+                                        send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
                                 else:
                                     supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
+                                    
+                                    updated_order = order.copy()
+                                    updated_order['status'] = 'manual_review'
+                                    send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
                             except Exception as e:
                                 logging.error(f"GamePoint Fulfillment Failed: {e}")
                                 supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
+                                
+                                updated_order = order.copy()
+                                updated_order['status'] = 'manual_review'
+                                send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
 
             elif status == 'failed':
                 supabase.table('orders').update({'status': 'failed', 'updated_at': datetime.utcnow().isoformat()}).eq('id', order_id).execute()
+                
+                order_data = supabase.table('orders').select('*, order_items(*, products(*, games(*)))').eq('id', order_id).single().execute()
+                order = order_data.data
+                if order:
+                    product = order['order_items'][0]['products']
+                    game = product.get('games', {})
+                    product_name = product.get('name')
+                    game_name = game.get('name', 'GameVault Product')
+                    customer_email = order.get('email') or form_data.get('customer_email')
+                    customer_name = order.get('remitter_name') or form_data.get('customer_name')
+                    
+                    send_order_update(order, product_name, game_name, customer_email, customer_name)
 
         return Response(status=200)
 
