@@ -52,15 +52,14 @@ SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY')
 BACKEND_URL = os.environ.get('RENDER_EXTERNAL_URL')
 PROXY_URL = os.environ.get('PROXY_URL')
 
-PROXY_DICT = {
-    "http": PROXY_URL,
-    "https": PROXY_URL
-} if PROXY_URL else None
+PROXY_DICT = {"http": PROXY_URL, "https": PROXY_URL} if PROXY_URL else None
 
 if not all([SUPABASE_URL, SUPABASE_SERVICE_KEY, BACKEND_URL]):
     raise ValueError("CRITICAL: Supabase credentials and BACKEND_URL must be set.")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+PRICE_CHECK_TOLERANCE = 0.05  # Allow a 5% difference before flagging
 
 BASE_URL = "https://www.gameuniverse.co"
 SMILE_ONE_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "Origin": "https://www.smile.one", "Cookie": os.environ.get("SMILE_ONE_COOKIE") }
@@ -88,18 +87,27 @@ GARENA_HEADERS = { 'Accept': 'application/json', 'Content-Type': 'application/js
 def before_request():
     g.language = i18n.get_user_language()
 
+@cache.cached("exchange_rate_myr_sgd", expire_seconds=3600)
+def get_myr_to_sgd_rate():
+    try:
+        rate_setting = supabase.table('settings').select('value').eq('key', 'myr_sgd_rate').single().execute()
+        if rate_setting.data and rate_setting.data.get('value'):
+            return float(rate_setting.data['value'])
+    except Exception:
+        pass
+    logging.warning("MYR_SGD_RATE not found in settings. Using default 0.31 for price check.")
+    return 0.31
+
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         auth_header = request.headers.get('Authorization')
         if not auth_header:
             return jsonify({"status": "error", "message": "Missing Authorization Header"}), 401
-        
         try:
             token = auth_header.split(" ")[1]
             user = supabase.auth.get_user(token)
             user_id = user.user.id
-            
             profile = supabase.table('profiles').select('role').eq('id', user_id).single().execute()
             if profile.data and profile.data['role'] in ['admin', 'owner']:
                 return f(*args, **kwargs)
@@ -120,19 +128,10 @@ def get_settings_from_db(keys):
 def get_hitpay_config():
     settings = get_settings_from_db(['hitpay_mode', 'hitpay_api_key_sandbox', 'hitpay_salt_sandbox', 'hitpay_api_key_live', 'hitpay_salt_live'])
     mode = settings.get('hitpay_mode', 'sandbox')
-    
     if mode == 'live':
-        return {
-            'url': 'https://api.hit-pay.com/v1/payment-requests',
-            'key': settings.get('hitpay_api_key_live'),
-            'salt': settings.get('hitpay_salt_live')
-        }
+        return {'url': 'https://api.hit-pay.com/v1/payment-requests', 'key': settings.get('hitpay_api_key_live'), 'salt': settings.get('hitpay_salt_live')}
     else:
-        return {
-            'url': 'https://api.sandbox.hit-pay.com/v1/payment-requests',
-            'key': settings.get('hitpay_api_key_sandbox'),
-            'salt': settings.get('hitpay_salt_sandbox')
-        }
+        return {'url': 'https://api.sandbox.hit-pay.com/v1/payment-requests', 'key': settings.get('hitpay_api_key_sandbox'), 'salt': settings.get('hitpay_salt_sandbox')}
 
 def perform_ml_check(user_id, zone_id):
     try:
@@ -150,13 +149,10 @@ def perform_ml_check(user_id, zone_id):
 def check_smile_one_api(game_code, uid, server_id=None):
     endpoints = { "mobilelegends": "https://www.smile.one/merchant/mobilelegends/checkrole", "bloodstrike": "https://www.smile.one/br/merchant/game/checkrole?product=bloodstrike", "loveanddeepspace": "https://www.smile.one/merchant/loveanddeepspace/checkrole/", "magicchessgogo": "https://www.smile.one/br/merchant/game/checkrole?product=magicchessgogo" }
     pids = {"mobilelegends": "25", "bloodstrike": "20294"}
-    
     target_endpoint = endpoints.get(game_code)
     if not target_endpoint:
         target_endpoint = f"https://www.smile.one/merchant/{game_code}/checkrole"
-
     pid_to_use = pids.get(game_code, "0")
-    
     params = {"checkrole": "1"}
     if game_code == "loveanddeepspace":
         server_sid_map = {"Asia": "81", "America": "82", "Europe": "83"}
@@ -171,7 +167,6 @@ def check_smile_one_api(game_code, uid, server_id=None):
         params.update({"uid": uid, "sid": server_id})
     else:
         params.update({"uid": uid, "sid": server_id, "pid": pid_to_use})
-    
     try:
         response = requests.post(target_endpoint, data=params, headers=SMILE_ONE_HEADERS, timeout=10, verify=certifi.where(), proxies=None)
         if "text/html" in response.headers.get('content-type', ''):
@@ -194,14 +189,11 @@ def check_bigo_native_api(uid):
 
 def check_gamingnp_api(game_code, uid):
     params = { "hok": {"id": "3898", "url": "https://gaming.com.np/topup/honor-of-kings"}, "pubgm": {"id": "3920", "url": "https://gaming.com.np/topup/pubg-mobile-global"} }
-    
     target_id = "0"
     target_url = "https://gaming.com.np"
-    
     if game_code in params:
         target_id = params[game_code]["id"]
         target_url = params[game_code]["url"]
-    
     headers = GAMINGNP_HEADERS.copy()
     headers["Referer"] = target_url
     try:
@@ -222,22 +214,12 @@ def check_spacegaming_api(game_id, uid):
 
 def check_netease_api(game_path, server_id, role_id):
     try:
-        params = {
-            "deviceid": str(uuid.uuid4()), 
-            "traceid": str(uuid.uuid4()), 
-            "timestamp": int(time.time()*1000), 
-            "roleid": role_id, 
-            "client_type": "gameclub"
-        }
-        
+        params = {"deviceid": str(uuid.uuid4()), "traceid": str(uuid.uuid4()), "timestamp": int(time.time()*1000), "roleid": role_id, "client_type": "gameclub"}
         headers = NETEASE_HEADERS.copy()
         headers["Referer"] = f"https://pay.neteasegames.com/{game_path}/topup"
-        
         url = f"{NETEASE_BASE_URL}/{game_path}/{server_id}/login-role"
-        
         response = requests.get(url, params=params, headers=headers, timeout=10, proxies=PROXY_DICT)
         data = response.json()
-        
         if data.get("code") == "0000": 
             return {"status": "success", "username": data.get("data", {}).get("rolename")}
         return {"status": "error", "message": "Invalid ID"}
@@ -333,7 +315,6 @@ VALIDATION_HANDLERS = {
     "universal_gamingnp": lambda uid, sid, cfg: check_gamingnp_api(cfg.get('target_id'), uid),
     "universal_spacegaming": lambda uid, sid, cfg: check_spacegaming_api(cfg.get('target_id'), uid),
     "universal_razer": lambda uid, sid, cfg: check_razer_api(cfg.get('target_id'), uid, sid),
-    
     "pubgm_global": lambda uid, sid, cfg: check_gamingnp_api("pubgm", uid),
     "genshin_impact": lambda uid, sid, cfg: check_razer_hoyoverse_api("genshinimpact", "genshin-impact", genshin_servers, uid, sid),
     "honkai_star_rail": lambda uid, sid, cfg: check_razer_hoyoverse_api("mihoyo-honkai-star-rail", "hsr", hsr_servers, uid, sid),
@@ -371,54 +352,30 @@ def admin_get_gp_catalog():
     cached_catalog = cache.get("admin_gp_full_catalog")
     if cached_catalog:
         return jsonify(cached_catalog)
-
     gp = GamePointService(supabase_client=supabase)
     token = gp.get_token()
-    
     try:
         list_resp = gp._request("product/list", {"token": token})
         products = list_resp.get('detail', [])
     except Exception as e:
         logging.error(f"Failed to fetch product list: {e}")
         return jsonify([])
-
     full_catalog = []
-    
     session = requests.Session()
-    adapter = HTTPAdapter(
-        pool_connections=30,  
-        pool_maxsize=30,      
-        max_retries=Retry(total=3, backoff_factor=0.5)
-    )
+    adapter = HTTPAdapter(pool_connections=30, pool_maxsize=30, max_retries=Retry(total=3, backoff_factor=0.5))
     session.mount("https://", adapter)
     session.mount("http://", adapter)
-
-    session.headers.update({
-        'Content-Type': 'application/json',
-        'partnerid': gp.partner_id,
-        'User-Agent': 'GameVault/1.0'
-    })
-    
+    session.headers.update({'Content-Type': 'application/json', 'partnerid': gp.partner_id, 'User-Agent': 'GameVault/1.0'})
     proxies = gp.proxies
     base_url = gp.base_url
     secret_key = gp.secret_key
-
     def fetch_detail_optimized(product):
         try:
             payload = {"token": token, "productid": product['id'], "timestamp": int(time.time())}
             encoded_payload = jwt.encode(payload, secret_key, algorithm='HS256')
             body = json.dumps({"payload": encoded_payload})
-            
-            resp = session.post(
-                f"{base_url}/product/detail", 
-                data=body, 
-                proxies=proxies, 
-                timeout=15,
-                verify=certifi.where()
-            )
-            
+            resp = session.post(f"{base_url}/product/detail", data=body, proxies=proxies, timeout=15, verify=certifi.where())
             detail_data = resp.json()
-            
             if detail_data.get('code') == 200:
                 product['packages'] = detail_data.get('package', [])
                 product['fields'] = detail_data.get('fields', [])
@@ -427,16 +384,13 @@ def admin_get_gp_catalog():
         except Exception as e:
             logging.error(f"Error fetching product {product['id']}: {e}")
         return None
-
     with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
         futures = {executor.submit(fetch_detail_optimized, p): p for p in products}
         for future in concurrent.futures.as_completed(futures):
             result = future.result()
             if result:
                 full_catalog.append(result)
-    
     cache.set("admin_gp_full_catalog", full_catalog, expire_seconds=3600)
-    
     return jsonify(full_catalog)
 
 @app.route('/api/admin/gamepoint/list', methods=['GET'])
@@ -470,7 +424,6 @@ def admin_download_gp_csv():
         products = list_resp.get('detail', [])
         if not products:
             return jsonify({"status": "error", "message": "No products found"}), 404
-
         def fetch_detail_safe(product):
             try:
                 detail_resp = gp._request("product/detail", {"token": token, "productid": product['id']})
@@ -479,7 +432,6 @@ def admin_download_gp_csv():
             except Exception as e:
                 logging.error(f"Error fetching product {product['id']}: {e}")
             return None
-
         def generate_csv():
             yield u'\ufeff' 
             yield "Product ID,Product Name,Package ID,Package Name,Cost Price\n"
@@ -493,9 +445,7 @@ def admin_download_gp_csv():
                         for pkg in result['packages']:
                             row = [str(p['id']), p_name, str(pkg['id']), pkg['name'].replace(',', ' '), str(pkg['price'])]
                             yield ",".join(row) + "\n"
-
         return Response(stream_with_context(generate_csv()), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename=gamepoint_catalog_{gp.config['mode']}.csv", "Cache-Control": "no-cache"})
-
     except Exception as e:
         logging.error(f"CSV Download Failed: {str(e)}")
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -516,7 +466,6 @@ def admin_gamepoint_config():
             from redis_cache import cache
             cache.delete(f"gamepoint_token_{data.get('gamepoint_mode', 'sandbox')}")
         return jsonify({"status": "success", "message": "Settings updated"})
-
     response = supabase.table('settings').select('key,value').ilike('key', 'gamepoint%').execute()
     settings = {item['key']: item['value'] for item in response.data}
     for k in ['gamepoint_secret_key_live', 'gamepoint_secret_key_sandbox', 'gamepoint_proxy_url']:
@@ -537,54 +486,38 @@ def admin_gamepoint_balance():
 @error_handler
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": _("user_id_required")}), 400
-    
     if game_slug == "ragnarok-origin":
         result = check_ro_origin_razer_api(uid, server_id)
         status_code = 200 if result.get("status") == "success" else 400
         return jsonify(result), status_code
-
     try:
         game_res = supabase.table('games').select('api_handler, supplier, supplier_pid, validation_param').eq('game_key', game_slug).single().execute()
-        
         if game_res.data:
             game_data = game_res.data
             api_handler_key = game_data.get('api_handler')
-            
             if api_handler_key and api_handler_key in VALIDATION_HANDLERS:
                 handler_func = VALIDATION_HANDLERS[api_handler_key]
-                
-                target_id = game_data.get('validation_param')
-                if not target_id:
-                    target_id = game_data.get('supplier_pid')
-                
-                config_for_handler = { 'target_id': target_id }
-                
+                target_id = game_data.get('validation_param') or game_data.get('supplier_pid')
+                config_for_handler = {'target_id': target_id}
                 result = handler_func(uid, server_id, config_for_handler)
-                
                 if result.get("status") == "success" and "roles" in result and len(result["roles"]) == 1:
                     result["username"] = result["roles"][0].get("roleName")
                     del result["roles"]
-                
                 return jsonify(result), 200 if result.get("status") == "success" else 400
-
             if game_data.get('supplier') == 'gamepoint':
                 gp = GamePointService(supabase_client=supabase)
                 inputs = {"input1": uid}
                 if server_id: inputs["input2"] = server_id
-                
                 supplier_pid = game_data.get('supplier_pid') 
                 if not supplier_pid: return jsonify({"status": "error", "message": "Game config missing supplier PID"}), 500
-                
                 resp = gp.validate_id(supplier_pid, inputs)
                 if resp.get('code') == 200:
                     return jsonify({"status": "success", "username": "Validated User", "roles": [], "validation_token": resp.get('validation_token')})
                 else:
                     return jsonify({"status": "error", "message": resp.get('message', 'Invalid ID')}), 400
-
     except Exception as e:
         logging.error(f"Error checking game ID: {e}")
         return jsonify({"status": "error", "message": "Validation Error"}), 500
-
     return jsonify({"status": "error", "message": _("validation_not_configured", game=game_slug)}), 400
 
 @app.route('/ro-origin/get-servers', methods=['GET', 'OPTIONS'])
@@ -603,56 +536,38 @@ def create_hitpay_payment():
     order_id = data.get('order_id')
     redirect_url = data.get('redirect_url')
     email = data.get('email')
-
     if not order_id or not redirect_url:
         return jsonify({'status': 'error', 'message': 'Missing data'}), 400
-
     try:
         order_res = supabase.table('orders').select('total_amount, status').eq('id', order_id).single().execute()
         order_data = order_res.data
-
         if not order_data:
             return jsonify({'status': 'error', 'message': 'Order not found'}), 404
-        
         if order_data['status'] in ['completed', 'processing', 'paid']:
              return jsonify({'status': 'error', 'message': 'Order already paid'}), 400
-
         real_amount = float(order_data['total_amount']) 
-        
         if email:
             supabase.table('orders').update({'email': email}).eq('id', order_id).execute()
-        
     except Exception as e:
         logging.error(f"DB Error fetching order price: {e}")
         return jsonify({'status': 'error', 'message': 'Server Error'}), 500
-
     config = get_hitpay_config()
     if not config or not config['key']:
         return jsonify({'status': 'error', 'message': 'Payment gateway not configured.'}), 500
-
     try:
         webhook_url = f"{BACKEND_URL}/api/webhook-handler"
         payload = {
-            'amount': real_amount,
-            'currency': 'SGD',
-            'reference_number': order_id,
-            'redirect_url': redirect_url,
-            'webhook': webhook_url,
-            'purpose': data.get('product_name', 'GameVault Order'),
-            'channel': 'api_custom',
-            'email': email or 'customer@example.com',
-            'name': data.get('name', 'GameVault Customer')
+            'amount': real_amount, 'currency': 'SGD', 'reference_number': order_id,
+            'redirect_url': redirect_url, 'webhook': webhook_url, 'purpose': data.get('product_name', 'GameVault Order'),
+            'channel': 'api_custom', 'email': email or 'customer@example.com', 'name': data.get('name', 'GameVault Customer')
         }
-        
         headers = {'X-BUSINESS-API-KEY': config['key'], 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
         response = requests.post(config['url'], headers=headers, json=payload, timeout=15, proxies=None)
         response_data = response.json()
-
         if response.status_code == 201:
             return jsonify({'status': 'success', 'payment_url': response_data['url']})
         else:
             return jsonify({'status': 'error', 'message': response_data.get('message', 'Failed to create payment')}), 400
-
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
@@ -663,146 +578,109 @@ def hitpay_webhook_handler():
         raw_body = request.get_data()
         form_data = request.form.to_dict()
         hitpay_signature = request.headers.get('X-Business-Signature')
-        
         config = get_hitpay_config()
         if config and config['salt']:
             generated_signature = hmac.new(key=bytes(config['salt'], 'utf-8'), msg=raw_body, digestmod=hashlib.sha256).hexdigest()
             if hitpay_signature and generated_signature != hitpay_signature:
                 logging.warning(f"Signature Mismatch!")
-        
         status = form_data.get('status')
         order_id = form_data.get('reference_number')
         payment_id = form_data.get('payment_id')
-
         if order_id:
             if status == 'completed':
                 try:
-                    result = supabase.table('orders').update({'status': 'processing', 'payment_id': payment_id})\
-                        .eq('id', order_id)\
-                        .in_('status', ['pending', 'verifying'])\
-                        .execute()
-                    
+                    result = supabase.table('orders').update({'status': 'processing', 'payment_id': payment_id}).eq('id', order_id).in_('status', ['pending', 'verifying']).execute()
                     if not result.data or len(result.data) == 0:
                         logging.info(f"Duplicate Webhook or Invalid Order: Order {order_id} already processed.")
                         return Response(status=200)
                 except Exception as e:
                     logging.error(f"Error locking order {order_id}: {e}")
                     return Response(status=500)
-
                 order_data = supabase.table('orders').select('*, order_items(*, products(*, games(*)))').eq('id', order_id).single().execute()
                 order = order_data.data
-                
                 if order and order.get('order_items'):
                     product = order['order_items'][0]['products']
                     game = product.get('games', {})
                     product_name = product.get('name')
                     game_name = game.get('name', 'GameVault Product')
-                    
                     customer_email = order.get('email') or form_data.get('customer_email')
                     customer_name = order.get('remitter_name') or form_data.get('customer_name')
-
                     gp_api = GamePointService(supabase_client=supabase)
-                    
                     supplier_config = product.get('supplier_config')
-                    
                     if supplier_config:
-                        all_success = True
-                        failed_items = []
-                        supplier_refs = []
-                        
+                        all_success, failed_items, supplier_refs = True, [], []
                         inputs = {"input1": order.get('game_uid')}
                         if order.get('server_region'): inputs["input2"] = order.get('server_region')
-                        
                         for item in supplier_config:
-                            gp_prod_id = item.get('gameId')
                             gp_pack_id = item.get('packageId')
-                            
                             try:
-                                val_resp = gp_api.validate_id(gp_prod_id, inputs)
+                                live_cost_myr_str = cache.get(f"gp_price:{gp_pack_id}")
+                                if live_cost_myr_str:
+                                    live_cost_myr, db_cost_sgd = float(live_cost_myr_str), float(product.get('original_price'))
+                                    exchange_rate = get_myr_to_sgd_rate()
+                                    if exchange_rate == 0: raise ValueError("Exchange rate cannot be zero.")
+                                    db_cost_in_myr = db_cost_sgd / exchange_rate
+                                    if live_cost_myr > db_cost_in_myr * (1 + PRICE_CHECK_TOLERANCE):
+                                        logging.warning(f"PRICE MISMATCH DETECTED for Order {order_id}, Package {gp_pack_id}. DB Cost (MYR): {db_cost_in_myr:.2f}, Live Cost (MYR): {live_cost_myr:.2f}")
+                                        all_success, _ = False, failed_items.append(f"{item.get('name')} (Price Mismatch)")
+                                        continue
+                            except Exception as price_check_error:
+                                logging.error(f"Price check failed for Order {order_id}, Package {gp_pack_id}: {price_check_error}")
+                                all_success, _ = False, failed_items.append(f"{item.get('name')} (Price Check Error)")
+                                continue
+                            try:
+                                val_resp = gp_api.validate_id(item.get('gameId'), inputs)
                                 val_token = val_resp.get('validation_token')
-                                
                                 if val_token:
                                     merchant_ref = f"{order_id[:8]}-{int(time.time())}-{random.randint(100,999)}"
                                     create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
-                                    
                                     if create_resp.get('code') in [100, 101]:
                                         supplier_refs.append(create_resp.get('referenceno'))
                                     else:
-                                        all_success = False
-                                        failed_items.append(f"{item.get('name')} (Err: {create_resp.get('message')})")
+                                        all_success, _ = False, failed_items.append(f"{item.get('name')} (Err: {create_resp.get('message')})")
                                 else:
-                                    all_success = False
-                                    failed_items.append(f"{item.get('name')} (Validation Failed)")
+                                    all_success, _ = False, failed_items.append(f"{item.get('name')} (Validation Failed)")
                             except Exception as e:
-                                all_success = False
-                                failed_items.append(f"{item.get('name')} (Exception: {str(e)})")
-                        
+                                all_success, _ = False, failed_items.append(f"{item.get('name')} (Exception: {str(e)})")
                         if all_success:
-                            supabase.table('orders').update({
-                                'status': 'completed', 
-                                'supplier_ref': ', '.join(supplier_refs)
-                            }).eq('id', order_id).execute()
-                            
-                            updated_order = order.copy()
-                            updated_order['status'] = 'completed'
+                            supabase.table('orders').update({'status': 'completed', 'supplier_ref': ', '.join(supplier_refs)}).eq('id', order_id).execute()
+                            updated_order = {**order, 'status': 'completed'}
                             send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
                         else:
-                            supabase.table('orders').update({
-                                'status': 'manual_review',
-                                'notes': f"Partial/Full Failure: {'; '.join(failed_items)}",
-                                'supplier_ref': ', '.join(supplier_refs)
-                            }).eq('id', order_id).execute()
-                            
-                            updated_order = order.copy()
-                            updated_order['status'] = 'manual_review'
+                            supabase.table('orders').update({'status': 'manual_review', 'notes': f"Partial/Full Failure: {'; '.join(failed_items)}", 'supplier_ref': ', '.join(supplier_refs)}).eq('id', order_id).execute()
+                            updated_order = {**order, 'status': 'manual_review'}
                             send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
-                    
                     else:
-                        gp_prod_id = product.get('gamepoint_product_id')
-                        gp_pack_id = product.get('gamepoint_package_id')
-
+                        gp_prod_id, gp_pack_id = product.get('gamepoint_product_id'), product.get('gamepoint_package_id')
                         if gp_prod_id and gp_pack_id:
                             try:
                                 inputs = {"input1": order.get('game_uid')}
                                 if order.get('server_region'): inputs["input2"] = order.get('server_region')
-                                
                                 val_resp = gp_api.validate_id(gp_prod_id, inputs)
                                 val_token = val_resp.get('validation_token')
-                                
                                 if val_token:
                                     merchant_ref = f"{order_id[:8]}-{int(time.time())}"
                                     create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
-                                    
                                     if create_resp.get('code') in [100, 101]:
                                         supabase.table('orders').update({'status': 'completed', 'supplier_ref': create_resp.get('referenceno')}).eq('id', order_id).execute()
-                                        
-                                        updated_order = order.copy()
-                                        updated_order['status'] = 'completed'
+                                        updated_order = {**order, 'status': 'completed'}
                                         send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
                                     else:
                                         error_msg = create_resp.get('message', 'Unknown Supplier Error')
                                         supabase.table('orders').update({'status': 'manual_review', 'notes': f"Supplier Failed: {error_msg}"}).eq('id', order_id).execute()
-                                        
-                                        updated_order = order.copy()
-                                        updated_order['status'] = 'manual_review'
+                                        updated_order = {**order, 'status': 'manual_review'}
                                         send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
                                 else:
                                     supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
-                                    
-                                    updated_order = order.copy()
-                                    updated_order['status'] = 'manual_review'
+                                    updated_order = {**order, 'status': 'manual_review'}
                                     send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
                             except Exception as e:
                                 logging.error(f"GamePoint Fulfillment Failed: {e}")
                                 supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
-                                
-                                updated_order = order.copy()
-                                updated_order['status'] = 'manual_review'
+                                updated_order = {**order, 'status': 'manual_review'}
                                 send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
-
             elif status == 'failed':
                 supabase.table('orders').update({'status': 'failed', 'updated_at': datetime.utcnow().isoformat()}).eq('id', order_id).execute()
-                
                 order_data = supabase.table('orders').select('*, order_items(*, products(*, games(*)))').eq('id', order_id).single().execute()
                 order = order_data.data
                 if order:
@@ -812,11 +690,8 @@ def hitpay_webhook_handler():
                     game_name = game.get('name', 'GameVault Product')
                     customer_email = order.get('email') or form_data.get('customer_email')
                     customer_name = order.get('remitter_name') or form_data.get('customer_name')
-                    
                     send_order_update(order, product_name, game_name, customer_email, customer_name)
-
         return Response(status=200)
-
     except Exception as e:
         logging.error(f"Webhook Error: {e}")
         return Response(status=200)
