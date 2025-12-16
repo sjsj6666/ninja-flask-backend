@@ -1,11 +1,9 @@
-# redis_cache.py (Updated)
-
 import redis
 import pickle
 import hashlib
 from functools import wraps
 import os
-from urllib.parse import urlparse # Import urlparse
+from urllib.parse import urlparse
 
 class RedisCache:
     def __init__(self):
@@ -69,41 +67,30 @@ class RedisCache:
             print(f"Redis clear pattern error: {e}")
             return False
 
+    # --- THIS IS THE FIX: Moved 'cached' inside the class ---
+    def cached(self, key_pattern=None, expire_seconds=3600):
+        def decorator(f):
+            @wraps(f)
+            def decorated_function(*args, **kwargs):
+                # Generate cache key
+                if key_pattern:
+                    cache_key = key_pattern
+                else:
+                    key_parts = [f.__name__] + [str(arg) for arg in args] + [f"{k}:{v}" for k, v in kwargs.items()]
+                    key_string = "::".join(key_parts)
+                    cache_key = hashlib.md5(key_string.encode()).hexdigest()
+                
+                # Try to get from cache (using self.get)
+                cached_result = self.get(cache_key)
+                if cached_result is not None:
+                    return cached_result
+                
+                # Execute function and cache result (using self.set)
+                result = f(*args, **kwargs)
+                self.set(cache_key, result, expire_seconds)
+                
+                return result
+            return decorated_function
+        return decorator
+
 cache = RedisCache()
-
-def cached(key_pattern=None, expire_seconds=3600):
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            # Generate cache key
-            if key_pattern:
-                cache_key = key_pattern
-            else:
-                key_parts = [f.__name__] + [str(arg) for arg in args] + [f"{k}:{v}" for k, v in kwargs.items()]
-                key_string = "::".join(key_parts)
-                cache_key = hashlib.md5(key_string.encode()).hexdigest()
-            
-            # Try to get from cache
-            cached_result = cache.get(cache_key)
-            if cached_result is not None:
-                print(f"Cache HIT for key: {cache_key}")
-                return cached_result
-            
-            print(f"Cache MISS for key: {cache_key}")
-            # Execute function and cache result
-            result = f(*args, **kwargs)
-            cache.set(cache_key, result, expire_seconds)
-            
-            return result
-        return decorated_function
-    return decorator
-
-def invalidate_cache(pattern):
-    def decorator(f):
-        @wraps(f)
-        def decorated_function(*args, **kwargs):
-            result = f(*args, **kwargs)
-            cache.clear_pattern(pattern)
-            return result
-        return decorated_function
-    return decorator
