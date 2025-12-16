@@ -696,31 +696,5 @@ def hitpay_webhook_handler():
         logging.error(f"Webhook Error: {e}")
         return Response(status=200)
 
-@app.route('/api/test-email-secret-trigger')
-def test_email_manually():
-    try:
-        test_order = {
-            'id': 'TEST-MANUAL-001',
-            'status': 'completed',
-            'total_amount': 88.88
-        }
-        
-        target_email = "shengjunton4me@gmail.com" 
-        
-        send_order_update(
-            order=test_order,
-            product_name="Test Product 100 Diamonds",
-            game_name="Test Game",
-            customer_email=target_email,
-            customer_name="Admin Tester"
-        )
-        
-        return jsonify({
-            "status": "success", 
-            "message": f"Email trigger sent to {target_email}. Check your inbox (and spam)."
-        }), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
