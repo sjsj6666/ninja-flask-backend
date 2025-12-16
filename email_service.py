@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # --- CONFIGURATION ---
 SMTP_SERVER = "smtp-relay.brevo.com"
-SMTP_PORT = 587
+SMTP_PORT = 2525
 # These come from your Environment Variables
 SMTP_LOGIN = os.environ.get('BREVO_SMTP_LOGIN') 
 SMTP_PASSWORD = os.environ.get('BREVO_SMTP_PASSWORD')
