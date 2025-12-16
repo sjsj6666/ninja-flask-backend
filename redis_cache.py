@@ -67,7 +67,7 @@ class RedisCache:
             print(f"Redis clear pattern error: {e}")
             return False
 
-    # --- THIS IS THE FIX: Moved 'cached' inside the class ---
+    # --- MOVED INSIDE THE CLASS ---
     def cached(self, key_pattern=None, expire_seconds=3600):
         def decorator(f):
             @wraps(f)
