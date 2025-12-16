@@ -40,7 +40,7 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-allowed_origins_str = os.environ.get('ALLOWED_ORIGINS', "http://127.0.0.1:5173,http://localhost:5173,https://www.gameuniverse.co")
+allowed_origins_str = os.environ.get('ALLOWED_ORIGINS', "http://127.0.1:5173,http://localhost:5173,https://www.gameuniverse.co")
 allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
 CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
 
@@ -59,7 +59,7 @@ if not all([SUPABASE_URL, SUPABASE_SERVICE_KEY, BACKEND_URL]):
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-PRICE_CHECK_TOLERANCE = 0.05  # Allow a 5% difference before flagging
+PRICE_CHECK_TOLERANCE = 0.05
 
 BASE_URL = "https://www.gameuniverse.co"
 SMILE_ONE_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "Origin": "https://www.smile.one", "Cookie": os.environ.get("SMILE_ONE_COOKIE") }
@@ -695,6 +695,32 @@ def hitpay_webhook_handler():
     except Exception as e:
         logging.error(f"Webhook Error: {e}")
         return Response(status=200)
+
+@app.route('/api/test-email-secret-trigger')
+def test_email_manually():
+    try:
+        test_order = {
+            'id': 'TEST-MANUAL-001',
+            'status': 'completed',
+            'total_amount': 88.88
+        }
+        
+        target_email = "shengjunton4me@gmail.com" 
+        
+        send_order_update(
+            order=test_order,
+            product_name="Test Product 100 Diamonds",
+            game_name="Test Game",
+            customer_email=target_email,
+            customer_name="Admin Tester"
+        )
+        
+        return jsonify({
+            "status": "success", 
+            "message": f"Email trigger sent to {target_email}. Check your inbox (and spam)."
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
