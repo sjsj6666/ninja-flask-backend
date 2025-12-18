@@ -548,8 +548,12 @@ def create_hitpay_payment():
         if order_data['status'] in ['completed', 'processing', 'paid']:
              return jsonify({'status': 'error', 'message': 'Order already paid'}), 400
         real_amount = float(order_data['total_amount']) 
-        if email:
-            supabase.table('orders').update({'email': email}).eq('id', order_id).execute()
+if email:
+            try:
+                supabase.table('orders').update({'email': email}).eq('id', order_id).execute()
+            except Exception as email_err:
+                # Log the error but don't stop the payment process
+                logging.warning(f"Could not save email to order: {email_err}")
     except Exception as e:
         logging.error(f"DB Error fetching order price: {e}")
         return jsonify({'status': 'error', 'message': 'Server Error'}), 500
