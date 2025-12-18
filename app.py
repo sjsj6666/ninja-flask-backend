@@ -548,12 +548,11 @@ def create_hitpay_payment():
         if order_data['status'] in ['completed', 'processing', 'paid']:
              return jsonify({'status': 'error', 'message': 'Order already paid'}), 400
         real_amount = float(order_data['total_amount']) 
-if email:
+        if email:
             try:
                 supabase.table('orders').update({'email': email}).eq('id', order_id).execute()
-            except Exception as email_err:
-                # Log the error but don't stop the payment process
-                logging.warning(f"Could not save email to order: {email_err}")
+            except Exception:
+                pass
     except Exception as e:
         logging.error(f"DB Error fetching order price: {e}")
         return jsonify({'status': 'error', 'message': 'Server Error'}), 500
@@ -613,15 +612,16 @@ def hitpay_webhook_handler():
                     customer_name = order.get('remitter_name') or form_data.get('customer_name')
                     gp_api = GamePointService(supabase_client=supabase)
                     supplier_config = product.get('supplier_config')
+                    
                     if supplier_config:
                         all_success, failed_items, supplier_refs = True, [], []
-                        # Check if game requires ID
                         inputs = {}
                         if game.get('requires_user_id') != False:
                             inputs["input1"] = order.get('game_uid')
                             if order.get('server_region'): inputs["input2"] = order.get('server_region')
                         else:
                             inputs["input1"] = "GIFT_CARD"
+                            
                         for item in supplier_config:
                             gp_pack_id = item.get('packageId')
                             try:
@@ -629,14 +629,11 @@ def hitpay_webhook_handler():
                                 if live_cost_myr_str:
                                     live_cost_myr, db_cost_sgd = float(live_cost_myr_str), float(product.get('original_price'))
                                     exchange_rate = get_myr_to_sgd_rate()
-                                    if exchange_rate == 0: raise ValueError("Exchange rate cannot be zero.")
                                     db_cost_in_myr = db_cost_sgd / exchange_rate
                                     if live_cost_myr > db_cost_in_myr * (1 + PRICE_CHECK_TOLERANCE):
-                                        logging.warning(f"PRICE MISMATCH DETECTED for Order {order_id}, Package {gp_pack_id}. DB Cost (MYR): {db_cost_in_myr:.2f}, Live Cost (MYR): {live_cost_myr:.2f}")
                                         all_success, _ = False, failed_items.append(f"{item.get('name')} (Price Mismatch)")
                                         continue
-                            except Exception as price_check_error:
-                                logging.error(f"Price check failed for Order {order_id}, Package {gp_pack_id}: {price_check_error}")
+                            except Exception:
                                 all_success, _ = False, failed_items.append(f"{item.get('name')} (Price Check Error)")
                                 continue
                             try:
@@ -647,20 +644,20 @@ def hitpay_webhook_handler():
                                     create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
                                     if create_resp.get('code') in [100, 101]:
                                         supplier_refs.append(create_resp.get('referenceno'))
+                                        if create_resp.get('code') == 101: all_success = False # Must wait for callback
                                     else:
                                         all_success, _ = False, failed_items.append(f"{item.get('name')} (Err: {create_resp.get('message')})")
                                 else:
                                     all_success, _ = False, failed_items.append(f"{item.get('name')} (Validation Failed)")
                             except Exception as e:
                                 all_success, _ = False, failed_items.append(f"{item.get('name')} (Exception: {str(e)})")
+                        
                         if all_success:
                             supabase.table('orders').update({'status': 'completed', 'supplier_ref': ', '.join(supplier_refs)}).eq('id', order_id).execute()
-                            updated_order = {**order, 'status': 'completed'}
-                            send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
+                            send_order_update({**order, 'status': 'completed'}, product_name, game_name, customer_email, customer_name)
                         else:
-                            supabase.table('orders').update({'status': 'manual_review', 'notes': f"Partial/Full Failure: {'; '.join(failed_items)}", 'supplier_ref': ', '.join(supplier_refs)}).eq('id', order_id).execute()
-                            updated_order = {**order, 'status': 'manual_review'}
-                            send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
+                            supabase.table('orders').update({'status': 'manual_review' if failed_items else 'processing', 'notes': f"Status: {'; '.join(failed_items)}", 'supplier_ref': ', '.join(supplier_refs)}).eq('id', order_id).execute()
+                    
                     else:
                         gp_prod_id, gp_pack_id = product.get('gamepoint_product_id'), product.get('gamepoint_package_id')
                         if gp_prod_id and gp_pack_id:
@@ -676,36 +673,19 @@ def hitpay_webhook_handler():
                                 if val_token:
                                     merchant_ref = f"{order_id[:8]}-{int(time.time())}"
                                     create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
-                                    if create_resp.get('code') in [100, 101]:
+                                    if create_resp.get('code') == 100:
                                         supabase.table('orders').update({'status': 'completed', 'supplier_ref': create_resp.get('referenceno')}).eq('id', order_id).execute()
-                                        updated_order = {**order, 'status': 'completed'}
-                                        send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
+                                        send_order_update({**order, 'status': 'completed'}, product_name, game_name, customer_email, customer_name)
+                                    elif create_resp.get('code') == 101:
+                                        supabase.table('orders').update({'status': 'processing', 'supplier_ref': create_resp.get('referenceno')}).eq('id', order_id).execute()
                                     else:
-                                        error_msg = create_resp.get('message', 'Unknown Supplier Error')
-                                        supabase.table('orders').update({'status': 'manual_review', 'notes': f"Supplier Failed: {error_msg}"}).eq('id', order_id).execute()
-                                        updated_order = {**order, 'status': 'manual_review'}
-                                        send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
+                                        supabase.table('orders').update({'status': 'manual_review', 'notes': f"Supplier Failed: {create_resp.get('message')}"}).eq('id', order_id).execute()
                                 else:
                                     supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
-                                    updated_order = {**order, 'status': 'manual_review'}
-                                    send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
-                            except Exception as e:
-                                logging.error(f"GamePoint Fulfillment Failed: {e}")
+                            except Exception:
                                 supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
-                                updated_order = {**order, 'status': 'manual_review'}
-                                send_order_update(updated_order, product_name, game_name, customer_email, customer_name)
             elif status == 'failed':
                 supabase.table('orders').update({'status': 'failed', 'updated_at': datetime.utcnow().isoformat()}).eq('id', order_id).execute()
-                order_data = supabase.table('orders').select('*, order_items(*, products(*, games(*)))').eq('id', order_id).single().execute()
-                order = order_data.data
-                if order:
-                    product = order['order_items'][0]['products']
-                    game = product.get('games', {})
-                    product_name = product.get('name')
-                    game_name = game.get('name', 'GameVault Product')
-                    customer_email = order.get('email') or form_data.get('customer_email')
-                    customer_name = order.get('remitter_name') or form_data.get('customer_name')
-                    send_order_update(order, product_name, game_name, customer_email, customer_name)
         return Response(status=200)
     except Exception as e:
         logging.error(f"Webhook Error: {e}")
@@ -719,32 +699,22 @@ def gamepoint_callback():
         logging.info(f"Received GamePoint Callback: {data}")
         merchant_code = data.get('merchantcode')
         status_code = str(data.get('code'))
-        pin1 = data.get('pin1')
-        pin2 = data.get('pin2')
-        message = data.get('message')
-        if not merchant_code:
-            return jsonify({"status": "error", "message": "Missing merchantcode"}), 400
+        pin1, pin2, message = data.get('pin1'), data.get('pin2'), data.get('message')
+        if not merchant_code: return jsonify({"status": "error", "message": "Missing merchantcode"}), 400
         order_res = supabase.table('orders').select('*').ilike('supplier_ref', f"%{merchant_code}%").execute()
         if not order_res.data:
             possible_id = merchant_code.split('-')[0]
             order_res = supabase.table('orders').select('*').ilike('id', f"{possible_id}%").execute()
-        if not order_res.data:
-            logging.error(f"Callback received for unknown order: {merchant_code}")
-            return jsonify({"status": "error", "message": "Order not found"}), 404
+        if not order_res.data: return jsonify({"status": "error", "message": "Order not found"}), 404
         order = order_res.data[0]
-        order_id = order['id']
         if status_code == '100': 
             voucher_data = {"pin1": pin1, "pin2": pin2, "message": message}
-            supabase.table('orders').update({'status': 'completed', 'voucher_codes': voucher_data, 'updated_at': datetime.utcnow().isoformat()}).eq('id', order_id).execute()
-            logging.info(f"Order {order_id} updated with Voucher Codes.")
-        elif status_code in ['101', '102']:
-            logging.info(f"Order {order_id} is still pending.")
-        else:
-            logging.warning(f"Order {order_id} failed via Callback. Code: {status_code}")
-            supabase.table('orders').update({'status': 'manual_review', 'notes': f"Callback Failure: {message}"}).eq('id', order_id).execute()
+            supabase.table('orders').update({'status': 'completed', 'voucher_codes': voucher_data, 'updated_at': datetime.utcnow().isoformat()}).eq('id', order['id']).execute()
+            # Optionally trigger email with codes here
+        elif status_code not in ['101', '102']:
+            supabase.table('orders').update({'status': 'manual_review', 'notes': f"Callback Failure: {message}"}).eq('id', order['id']).execute()
         return jsonify({"code": 200, "message": "Callback received"}), 200
     except Exception as e:
-        logging.error(f"Callback processing error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
