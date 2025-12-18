@@ -491,9 +491,11 @@ def check_game_id(game_slug, uid, server_id):
         status_code = 200 if result.get("status") == "success" else 400
         return jsonify(result), status_code
     try:
-        game_res = supabase.table('games').select('api_handler, supplier, supplier_pid, validation_param').eq('game_key', game_slug).single().execute()
+        game_res = supabase.table('games').select('api_handler, supplier, supplier_pid, validation_param, requires_user_id').eq('game_key', game_slug).single().execute()
         if game_res.data:
             game_data = game_res.data
+            if game_data.get('requires_user_id') == False:
+                return jsonify({"status": "success", "username": "Voucher/GiftCard", "roles": []})
             api_handler_key = game_data.get('api_handler')
             if api_handler_key and api_handler_key in VALIDATION_HANDLERS:
                 handler_func = VALIDATION_HANDLERS[api_handler_key]
@@ -609,8 +611,13 @@ def hitpay_webhook_handler():
                     supplier_config = product.get('supplier_config')
                     if supplier_config:
                         all_success, failed_items, supplier_refs = True, [], []
-                        inputs = {"input1": order.get('game_uid')}
-                        if order.get('server_region'): inputs["input2"] = order.get('server_region')
+                        # Check if game requires ID
+                        inputs = {}
+                        if game.get('requires_user_id') != False:
+                            inputs["input1"] = order.get('game_uid')
+                            if order.get('server_region'): inputs["input2"] = order.get('server_region')
+                        else:
+                            inputs["input1"] = "GIFT_CARD"
                         for item in supplier_config:
                             gp_pack_id = item.get('packageId')
                             try:
@@ -654,8 +661,12 @@ def hitpay_webhook_handler():
                         gp_prod_id, gp_pack_id = product.get('gamepoint_product_id'), product.get('gamepoint_package_id')
                         if gp_prod_id and gp_pack_id:
                             try:
-                                inputs = {"input1": order.get('game_uid')}
-                                if order.get('server_region'): inputs["input2"] = order.get('server_region')
+                                inputs = {}
+                                if game.get('requires_user_id') != False:
+                                    inputs["input1"] = order.get('game_uid')
+                                    if order.get('server_region'): inputs["input2"] = order.get('server_region')
+                                else:
+                                    inputs["input1"] = "GIFT_CARD"
                                 val_resp = gp_api.validate_id(gp_prod_id, inputs)
                                 val_token = val_resp.get('validation_token')
                                 if val_token:
@@ -701,60 +712,33 @@ def hitpay_webhook_handler():
 def gamepoint_callback():
     try:
         data = request.form.to_dict() if request.form else request.get_json()
-        
         logging.info(f"Received GamePoint Callback: {data}")
-
         merchant_code = data.get('merchantcode')
         status_code = str(data.get('code'))
         pin1 = data.get('pin1')
         pin2 = data.get('pin2')
         message = data.get('message')
-
         if not merchant_code:
             return jsonify({"status": "error", "message": "Missing merchantcode"}), 400
-
         order_res = supabase.table('orders').select('*').ilike('supplier_ref', f"%{merchant_code}%").execute()
-        
         if not order_res.data:
             possible_id = merchant_code.split('-')[0]
             order_res = supabase.table('orders').select('*').ilike('id', f"{possible_id}%").execute()
-
         if not order_res.data:
             logging.error(f"Callback received for unknown order: {merchant_code}")
             return jsonify({"status": "error", "message": "Order not found"}), 404
-
         order = order_res.data[0]
         order_id = order['id']
-
-        if status_code == '100': # Success
-            voucher_data = {
-                "pin1": pin1,
-                "pin2": pin2,
-                "message": message
-            }
-            
-            # Update DB ONLY (No Email)
-            supabase.table('orders').update({
-                'status': 'completed',
-                'voucher_codes': voucher_data,
-                'updated_at': datetime.utcnow().isoformat()
-            }).eq('id', order_id).execute()
-            
+        if status_code == '100': 
+            voucher_data = {"pin1": pin1, "pin2": pin2, "message": message}
+            supabase.table('orders').update({'status': 'completed', 'voucher_codes': voucher_data, 'updated_at': datetime.utcnow().isoformat()}).eq('id', order_id).execute()
             logging.info(f"Order {order_id} updated with Voucher Codes.")
-
         elif status_code in ['101', '102']:
             logging.info(f"Order {order_id} is still pending.")
-            pass
-
         else:
             logging.warning(f"Order {order_id} failed via Callback. Code: {status_code}")
-            supabase.table('orders').update({
-                'status': 'manual_review',
-                'notes': f"Callback Failure: {message}"
-            }).eq('id', order_id).execute()
-
+            supabase.table('orders').update({'status': 'manual_review', 'notes': f"Callback Failure: {message}"}).eq('id', order_id).execute()
         return jsonify({"code": 200, "message": "Callback received"}), 200
-
     except Exception as e:
         logging.error(f"Callback processing error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
