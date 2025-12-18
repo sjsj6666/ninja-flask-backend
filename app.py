@@ -491,7 +491,7 @@ def check_game_id(game_slug, uid, server_id):
         status_code = 200 if result.get("status") == "success" else 400
         return jsonify(result), status_code
     try:
-        game_res = supabase.table('games').select('api_handler, supplier, supplier_pid, validation_param, requires_user_id').eq('game_key', game_slug).single().execute()
+        game_res = supabase.table('games').select('api_handler%2Csupplier%2Csupplier_pid%2Cvalidation_param%2Crequires_user_id').eq('game_key', game_slug).single().execute()
         if game_res.data:
             game_data = game_res.data
             if game_data.get('requires_user_id') == False:
@@ -629,6 +629,7 @@ def hitpay_webhook_handler():
                                 if live_cost_myr_str:
                                     live_cost_myr, db_cost_sgd = float(live_cost_myr_str), float(product.get('original_price'))
                                     exchange_rate = get_myr_to_sgd_rate()
+                                    if exchange_rate == 0: raise ValueError("Exchange rate cannot be zero.")
                                     db_cost_in_myr = db_cost_sgd / exchange_rate
                                     if live_cost_myr > db_cost_in_myr * (1 + PRICE_CHECK_TOLERANCE):
                                         all_success, _ = False, failed_items.append(f"{item.get('name')} (Price Mismatch)")
@@ -642,9 +643,11 @@ def hitpay_webhook_handler():
                                 if val_token:
                                     merchant_ref = f"{order_id[:8]}-{int(time.time())}-{random.randint(100,999)}"
                                     create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
-                                    if create_resp.get('code') in [100, 101]:
+                                    if create_resp.get('code') == 100:
                                         supplier_refs.append(create_resp.get('referenceno'))
-                                        if create_resp.get('code') == 101: all_success = False # Must wait for callback
+                                    elif create_resp.get('code') == 101:
+                                        supplier_refs.append(create_resp.get('referenceno'))
+                                        all_success = False # Stay in processing
                                     else:
                                         all_success, _ = False, failed_items.append(f"{item.get('name')} (Err: {create_resp.get('message')})")
                                 else:
@@ -710,7 +713,6 @@ def gamepoint_callback():
         if status_code == '100': 
             voucher_data = {"pin1": pin1, "pin2": pin2, "message": message}
             supabase.table('orders').update({'status': 'completed', 'voucher_codes': voucher_data, 'updated_at': datetime.utcnow().isoformat()}).eq('id', order['id']).execute()
-            # Optionally trigger email with codes here
         elif status_code not in ['101', '102']:
             supabase.table('orders').update({'status': 'manual_review', 'notes': f"Callback Failure: {message}"}).eq('id', order['id']).execute()
         return jsonify({"code": 200, "message": "Callback received"}), 200
