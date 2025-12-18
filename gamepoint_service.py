@@ -14,7 +14,6 @@ _token_cache = {}
 
 class GamePointService:
     def __init__(self, supabase_client=None):
-        # Optimization: Reuse existing client if provided
         if supabase_client:
             self.supabase = supabase_client
         else:
@@ -200,3 +199,11 @@ class GamePointService:
             "merchantcode": merchant_code
         }
         return self._request("order/create", payload)
+
+    def check_order_status(self, merchant_code):
+        token = self.get_token()
+        payload = {
+            "token": token,
+            "merchantcode": merchant_code
+        }
+        return self._request("order/inquiry", payload)
