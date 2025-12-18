@@ -696,5 +696,68 @@ def hitpay_webhook_handler():
         logging.error(f"Webhook Error: {e}")
         return Response(status=200)
 
+@app.route('/api/callbacks/gamepoint', methods=['POST'])
+@cross_origin()
+def gamepoint_callback():
+    try:
+        data = request.form.to_dict() if request.form else request.get_json()
+        
+        logging.info(f"Received GamePoint Callback: {data}")
+
+        merchant_code = data.get('merchantcode')
+        status_code = str(data.get('code'))
+        pin1 = data.get('pin1')
+        pin2 = data.get('pin2')
+        message = data.get('message')
+
+        if not merchant_code:
+            return jsonify({"status": "error", "message": "Missing merchantcode"}), 400
+
+        order_res = supabase.table('orders').select('*').ilike('supplier_ref', f"%{merchant_code}%").execute()
+        
+        if not order_res.data:
+            possible_id = merchant_code.split('-')[0]
+            order_res = supabase.table('orders').select('*').ilike('id', f"{possible_id}%").execute()
+
+        if not order_res.data:
+            logging.error(f"Callback received for unknown order: {merchant_code}")
+            return jsonify({"status": "error", "message": "Order not found"}), 404
+
+        order = order_res.data[0]
+        order_id = order['id']
+
+        if status_code == '100': # Success
+            voucher_data = {
+                "pin1": pin1,
+                "pin2": pin2,
+                "message": message
+            }
+            
+            # Update DB ONLY (No Email)
+            supabase.table('orders').update({
+                'status': 'completed',
+                'voucher_codes': voucher_data,
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', order_id).execute()
+            
+            logging.info(f"Order {order_id} updated with Voucher Codes.")
+
+        elif status_code in ['101', '102']:
+            logging.info(f"Order {order_id} is still pending.")
+            pass
+
+        else:
+            logging.warning(f"Order {order_id} failed via Callback. Code: {status_code}")
+            supabase.table('orders').update({
+                'status': 'manual_review',
+                'notes': f"Callback Failure: {message}"
+            }).eq('id', order_id).execute()
+
+        return jsonify({"code": 200, "message": "Callback received"}), 200
+
+    except Exception as e:
+        logging.error(f"Callback processing error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
