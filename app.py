@@ -225,6 +225,29 @@ def check_netease_api(game_path, server_id, role_id):
         return {"status": "error", "message": "Invalid ID"}
     except Exception: return {"status": "error", "message": "API Error"}
 
+def check_ace_racer_api(uid, gp_server_id):
+    # Mapping GamePoint Server IDs to NetEase Real Server IDs
+    # Based on observation: 105xx -> 100xx
+    # 10501 -> 10001 (Japan)
+    # 10511 -> 10011 (Korea)
+    # 10521 -> 10021 (Asia)
+    # 10531 -> 10031 (North America)
+    # 10541 -> 10041 (Europe)
+    
+    mapping = {
+        "10501": "10001",
+        "10511": "10011",
+        "10521": "10021",
+        "10531": "10031",
+        "10541": "10041"
+    }
+    
+    # If the ID passed is in our map, convert it. Otherwise try using it as is.
+    real_sid = mapping.get(str(gp_server_id), str(gp_server_id))
+    
+    # Pass 'aceracer' as path (verified via logs)
+    return check_netease_api("aceracer", real_sid, uid)
+
 def check_razer_hoyoverse_api(api_path, referer, server_map, uid, server_name):
     sid = server_map.get(server_name)
     if not sid: return {"status": "error", "message": "Invalid Server"}
@@ -334,7 +357,7 @@ VALIDATION_HANDLERS = {
     "ragnarok_x_next_gen": lambda uid, sid, cfg: check_nuverse_api("3402", uid),
     "snowbreak": lambda uid, sid, cfg: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(sid)),
     "delta_force": lambda uid, sid, cfg: check_garena_api("100151", uid),
-"ace_racer": lambda uid, sid, cfg: check_netease_api("aceracerglobal", sid, uid),
+    "ace_racer": lambda uid, sid, cfg: check_ace_racer_api(uid, sid),
 }
 
 @app.route('/')
