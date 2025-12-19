@@ -26,7 +26,6 @@ from urllib.parse import urlencode, urlparse, quote_plus
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# Local Module Imports
 from i18n import i18n, gettext as _
 from gamepoint_service import GamePointService
 from error_handler import error_handler, log_execution_time
@@ -35,7 +34,6 @@ from email_service import send_order_update
 
 app = Flask(__name__)
 
-# --- CORE CONFIGURATION ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 port = int(os.environ.get("PORT", 10000))
 
@@ -53,7 +51,6 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 PRICE_CHECK_TOLERANCE = 0.05
 BASE_URL = "https://www.gameuniverse.co"
 
-# --- API HEADERS ---
 SMILE_ONE_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded", "Origin": "https://www.smile.one", "Cookie": os.environ.get("SMILE_ONE_COOKIE") }
 BIGO_NATIVE_VALIDATE_URL = "https://mobile.bigo.tv/pay-bigolive-tv/quicklyPay/getUserDetail"
 BIGO_NATIVE_HEADERS = { "User-Agent": "Mozilla/5.0", "Accept": "*/*", "Origin": "https://www.gamebar.gg", "Referer": "https://www.gamebar.gg/" }
@@ -75,7 +72,6 @@ GARENA_LOGIN_URL = "https://shop.garena.sg/api/auth/player_id_login"
 GARENA_ROLES_URL = "https://shop.garena.sg/api/shop/apps/roles"
 GARENA_HEADERS = { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' }
 
-# --- MIDDLEWARE & UTILS ---
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -123,7 +119,6 @@ def get_hitpay_config():
         return {'url': 'https://api.hit-pay.com/v1/payment-requests', 'key': s.get('hitpay_api_key_live'), 'salt': s.get('hitpay_salt_live')}
     return {'url': 'https://api.sandbox.hit-pay.com/v1/payment-requests', 'key': s.get('hitpay_api_key_sandbox'), 'salt': s.get('hitpay_salt_sandbox')}
 
-# --- VALIDATION ENGINE FUNCTIONS ---
 def perform_ml_check(user_id, zone_id):
     try:
         api_url = "https://cekidml.caliph.dev/api/validasi"
@@ -237,7 +232,6 @@ def check_garena_api(app_id, uid):
             return {"status": "error", "message": "No player found"}
         except: return {"status": "error", "message": "API Error"}
 
-# --- VALIDATION HANDLERS MAP ---
 genshin_servers = {"Asia": "os_asia", "America": "os_usa", "Europe": "os_euro", "TW,HK,MO": "os_cht"}
 hsr_servers = {"Asia": "prod_official_asia", "America": "prod_official_usa", "Europe": "prod_official_eur", "TW/HK/MO": "prod_official_cht"}
 zzz_servers = {"Asia": "prod_gf_jp", "America": "prod_gf_us", "Europe": "prod_gf_eu", "TW/HK/MO": "prod_gf_sg"}
@@ -261,15 +255,41 @@ VALIDATION_HANDLERS = {
     "delta_force": lambda uid, sid, cfg: check_garena_api("100151", uid),
 }
 
-# --- PRIMARY ROUTES ---
-
 @app.route('/')
 def home():
-    return _("welcome_message")
+    return "GameVault Backend API is Online."
 
 @app.route('/health')
 def health_check():
     return jsonify({"status": "healthy"}), 200
+
+@app.route('/api/cron/sync-prices', methods=['GET'])
+def cron_sync_prices():
+    secret = request.headers.get('X-Cron-Secret')
+    if secret != os.environ.get('CRON_SECRET'):
+        return jsonify({"status": "error", "message": "Unauthorized"}), 401
+    try:
+        exchange_rate = get_myr_to_sgd_rate()
+        gp = GamePointService(supabase_client=supabase)
+        catalog = gp.get_full_catalog()
+        cost_map = {}
+        for game in catalog:
+            for pkg in game.get('packages', []):
+                cost_map[pkg['id']] = float(pkg['price'])
+        products_res = supabase.table('products').select('*').not_.is_('gamepoint_package_id', 'null').execute()
+        updates = []
+        for p in products_res.data:
+            cost_myr = cost_map.get(p['gamepoint_package_id'])
+            if cost_myr:
+                cost_sgd = cost_myr * exchange_rate
+                new_price = round(cost_sgd * 1.2, 2)
+                updates.append({"id": p['id'], "price": new_price, "original_price": round(cost_sgd, 4)})
+        if updates:
+            for item in updates:
+                supabase.table('products').update({"price": item['price'], "original_price": item['original_price']}).eq('id', item['id']).execute()
+        return jsonify({"status": "success", "updated": len(updates)}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
@@ -278,28 +298,21 @@ def health_check():
 def check_game_id(game_slug, uid, server_id):
     if not uid: return jsonify({"status": "error", "message": _("user_id_required")}), 400
     if game_slug == "ragnarok-origin": return jsonify(check_ro_origin_razer_api(uid, server_id))
-    
     res = supabase.table('games').select('*').eq('game_key', game_slug).single().execute()
     if not res.data: return jsonify({"status": "error", "message": "Game not found"}), 404
-    
     game = res.data
     if game.get('requires_user_id') == False: return jsonify({"status": "success", "username": "Voucher"})
-    
     handler_key = game.get('api_handler')
     if handler_key in VALIDATION_HANDLERS:
         target = game.get('validation_param') or game.get('supplier_pid')
         result = VALIDATION_HANDLERS[handler_key](uid, server_id, {'target_id': target})
         return jsonify(result), 200 if result.get("status") == "success" else 400
-    
     if game.get('supplier') == 'gamepoint':
         gp = GamePointService(supabase_client=supabase)
         resp = gp.validate_id(game.get('supplier_pid'), {"input1": uid, "input2": server_id} if server_id else {"input1": uid})
         if resp.get('code') == 200: return jsonify({"status": "success", "username": "Validated", "validation_token": resp.get('validation_token')})
         return jsonify({"status": "error", "message": resp.get('message')}), 400
-
     return jsonify({"status": "error", "message": "Validation not configured"}), 400
-
-# --- ADMIN ROUTES ---
 
 @app.route('/api/admin/gamepoint/catalog', methods=['GET'])
 @admin_required
@@ -308,7 +321,7 @@ def admin_get_gp_catalog():
     cached = cache.get("admin_gp_full_catalog")
     if cached: return jsonify(cached)
     gp = GamePointService(supabase_client=supabase)
-    full_catalog = gp.get_full_catalog() # Assumes ThreadPool inside service
+    full_catalog = gp.get_full_catalog()
     cache.set("admin_gp_full_catalog", full_catalog, expire_seconds=3600)
     return jsonify(full_catalog)
 
@@ -327,15 +340,12 @@ def admin_download_gp_csv():
                     yield f"{p['id']},{p['name'].replace(',',' ')},{pkg['id']},{pkg['name'].replace(',',' ')},{pkg['price']}\n"
     return Response(stream_with_context(generate_csv()), mimetype="text/csv", headers={"Content-Disposition": "attachment; filename=gp_catalog.csv"})
 
-# --- PAYMENT & WEBHOOKS ---
-
 @app.route('/api/create-payment', methods=['POST'])
 def create_hitpay_payment():
     data = request.get_json()
     order_id, redirect_url = data.get('order_id'), data.get('redirect_url')
     order_res = supabase.table('orders').select('*').eq('id', order_id).single().execute()
     if not order_res.data: return jsonify({'status': 'error', 'message': 'Order not found'}), 404
-    
     config = get_hitpay_config()
     payload = {
         'amount': float(order_res.data['total_amount']), 'currency': 'SGD', 'reference_number': order_id,
@@ -352,22 +362,16 @@ def hitpay_webhook_handler():
         form_data = request.form.to_dict()
         status, order_id = form_data.get('status'), form_data.get('reference_number')
         if status == 'completed' and order_id:
-            # Atomic lock
             lock = supabase.table('orders').update({'status': 'processing'}).eq('id', order_id).in_('status', ['pending', 'verifying']).execute()
             if not lock.data: return Response(status=200)
-
             order = supabase.table('orders').select('*, order_items(*, products(*, games(*)))').eq('id', order_id).single().execute().data
             if not order: return Response(status=200)
-
             product = order['order_items'][0]['products']
             game = product.get('games', {})
             gp_api = GamePointService(supabase_client=supabase)
-            
-            # Handle Bundles (supplier_config)
             supplier_config = product.get('supplier_config')
             inputs = {"input1": order.get('game_uid') if game.get('requires_user_id') != False else "GIFT_CARD"}
             if order.get('server_region'): inputs["input2"] = order.get('server_region')
-
             if supplier_config:
                 all_success, failed_items, supplier_refs = True, [], []
                 for item in supplier_config:
@@ -383,13 +387,10 @@ def hitpay_webhook_handler():
                             else: all_success, _ = False, failed_items.append(f"{item.get('name')} Fail")
                         else: all_success, _ = False, failed_items.append(f"{item.get('name')} Val Fail")
                     except: all_success, _ = False, failed_items.append(f"{item.get('name')} Err")
-                
                 final_status = 'completed' if all_success else ('manual_review' if failed_items else 'processing')
                 supabase.table('orders').update({'status': final_status, 'supplier_ref': ', '.join(supplier_refs), 'notes': f"Issues: {'; '.join(failed_items)}"}).eq('id', order_id).execute()
                 if final_status == 'completed': send_order_update(order, product['name'], game['name'], order['email'], order['remitter_name'])
-            
             else:
-                # Handle Single GamePoint Product
                 gp_prod_id, gp_pack_id = product.get('gamepoint_product_id'), product.get('gamepoint_package_id')
                 if gp_prod_id and gp_pack_id:
                     try:
@@ -405,7 +406,6 @@ def hitpay_webhook_handler():
                                 if final_s == 'completed': send_order_update(order, product['name'], game['name'], order['email'], order['remitter_name'])
                             else: supabase.table('orders').update({'status': 'manual_review', 'notes': create_resp.get('message')}).eq('id', order_id).execute()
                     except: supabase.table('orders').update({'status': 'manual_review'}).eq('id', order_id).execute()
-
         return Response(status=200)
     except Exception as e:
         logging.error(f"Webhook Error: {e}")
@@ -414,16 +414,12 @@ def hitpay_webhook_handler():
 @app.route('/api/callbacks/gamepoint', methods=['POST'])
 @cross_origin()
 def gamepoint_callback():
-    """Returns plain text 'OK' as required by GamePoint V1.93"""
     try:
         data = request.form.to_dict() or request.get_json() or {}
         merchant_code, status_code = data.get('merchantcode'), str(data.get('code'))
-        
-        # Order lookup
         order_res = supabase.table('orders').select('*').ilike('supplier_ref', f"%{data.get('referenceno')}%").execute()
         if not order_res.data and merchant_code:
             order_res = supabase.table('orders').select('*').ilike('id', f"{merchant_code.split('-')[0]}%").execute()
-        
         if order_res.data:
             order = order_res.data[0]
             if status_code == '100':
@@ -431,7 +427,6 @@ def gamepoint_callback():
                 supabase.table('orders').update({'status': 'completed', 'voucher_codes': v_data, 'updated_at': datetime.utcnow().isoformat()}).eq('id', order['id']).execute()
             elif status_code not in ['101', '102']:
                 supabase.table('orders').update({'status': 'manual_review', 'notes': f"Callback: {data.get('message')}"}).eq('id', order['id']).execute()
-        
         return Response("OK", mimetype="text/plain")
     except Exception as e:
         logging.error(f"Callback Error: {e}")
