@@ -110,10 +110,8 @@ class GamePointService:
             
             if resp_json.get('code') not in [100, 101, 200]:
                 logger.error(f"GamePoint API Error: {resp_json}")
-                raise ExternalAPIError(
-                    f"GamePoint Error {resp_json.get('code')}: {resp_json.get('message')}",
-                    service_name="GamePoint"
-                )
+                # We return the error json instead of raising, so caller can handle specific codes like 319
+                return resp_json 
                 
             return resp_json
 
@@ -200,10 +198,11 @@ class GamePointService:
         }
         return self._request("order/create", payload)
 
-    def check_order_status(self, merchant_code):
+    def check_order_status(self, reference_no):
         token = self.get_token()
         payload = {
             "token": token,
-            "merchantcode": merchant_code
+            # FIXED: Correct parameter name according to API Docs
+            "referenceno": reference_no 
         }
         return self._request("order/inquiry", payload)
