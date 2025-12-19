@@ -647,7 +647,7 @@ def hitpay_webhook_handler():
                                         supplier_refs.append(create_resp.get('referenceno'))
                                     elif create_resp.get('code') == 101:
                                         supplier_refs.append(create_resp.get('referenceno'))
-                                        all_success = False 
+                                        all_success = False # Stay in processing
                                     else:
                                         all_success, _ = False, failed_items.append(f"{item.get('name')} (Err: {create_resp.get('message')})")
                                 else:
@@ -705,12 +705,23 @@ def gamepoint_callback():
         pin1, pin2, message = data.get('pin1'), data.get('pin2'), data.get('message')
         if not merchant_code:
             return Response("OK", status=200, mimetype='text/plain')
+        
+        # Try finding by exact supplier ref match first
         order_res = supabase.table('orders').select('*').ilike('supplier_ref', f"%{merchant_code}%").execute()
+        
         if not order_res.data:
+            # Fallback: Try to find by order ID prefix embedded in merchant_code
+            # merchant_code format is often: "{uuid_prefix}-{timestamp}-{random}"
             possible_id = merchant_code.split('-')[0]
-            order_res = supabase.table('orders').select('*').ilike('id', f"{possible_id}%").execute()
+            
+            # FIX: Cast UUID 'id' to text for ILIKE comparison
+            # Postgres error 42883 occurs if we ilike a UUID column directly
+            order_res = supabase.table('orders').select('*').ilike('id::text', f"{possible_id}%").execute()
+            
         if not order_res.data:
+            # Order not found, but we still return OK to stop GamePoint from retrying forever
             return Response("OK", status=200, mimetype='text/plain')
+            
         order = order_res.data[0]
         if status_code == '100': 
             voucher_data = {"pin1": pin1, "pin2": pin2, "message": message}
@@ -720,6 +731,7 @@ def gamepoint_callback():
         return Response("OK", status=200, mimetype='text/plain')
     except Exception as e:
         logging.error(f"GP Callback Error: {e}")
+        # Return OK even on internal error to prevent callback loops if the logic is broken
         return Response("OK", status=200, mimetype='text/plain')
 
 if __name__ == "__main__":
