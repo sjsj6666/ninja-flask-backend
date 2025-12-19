@@ -491,7 +491,7 @@ def check_game_id(game_slug, uid, server_id):
         status_code = 200 if result.get("status") == "success" else 400
         return jsonify(result), status_code
     try:
-        game_res = supabase.table('games').select('api_handler%2Csupplier%2Csupplier_pid%2Cvalidation_param%2Crequires_user_id').eq('game_key', game_slug).single().execute()
+        game_res = supabase.table('games').select('api_handler,supplier,supplier_pid,validation_param,requires_user_id').eq('game_key', game_slug).single().execute()
         if game_res.data:
             game_data = game_res.data
             if game_data.get('requires_user_id') == False:
