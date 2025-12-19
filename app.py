@@ -733,7 +733,10 @@ def admin_sync_order(order_id):
         supplier_ref = order.get('supplier_ref')
         
         if not supplier_ref:
-             return jsonify({"status": "error", "message": "Cannot sync: No Supplier Reference (GPxxxx) found in database."}), 400
+             return jsonify({
+                 "status": "error", 
+                 "message": "Cannot sync: Missing 'supplier_ref'. Please manually update the database with the GamePoint Transaction ID (GP...) first."
+             }), 400
 
         gp = GamePointService(supabase_client=supabase)
         
