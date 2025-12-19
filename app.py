@@ -632,7 +632,15 @@ def hitpay_webhook_handler():
                             
                             # UPDATED: Automatically map validated username to input2 for Bigo
                             if game.get('game_key') == 'bigo-live-direct-id' or 'bigo' in game.get('name', '').lower():
-                                inputs["input2"] = order.get('game_nickname')
+                                # Check if game_nickname was saved. If not, use native check now.
+                                nickname = order.get('game_nickname')
+                                if not nickname:
+                                    try:
+                                        check_res = check_bigo_native_api(order.get('game_uid'))
+                                        if check_res.get('status') == 'success':
+                                            nickname = check_res.get('username')
+                                    except: pass
+                                inputs["input2"] = nickname or "User" 
                             elif order.get('server_region'):
                                 inputs["input2"] = order.get('server_region')
                         else:
@@ -687,7 +695,14 @@ def hitpay_webhook_handler():
                                     
                                     # UPDATED: Automatically map validated username to input2 for Bigo
                                     if game.get('game_key') == 'bigo-live-direct-id' or 'bigo' in game.get('name', '').lower():
-                                        inputs["input2"] = order.get('game_nickname')
+                                        nickname = order.get('game_nickname')
+                                        if not nickname:
+                                            try:
+                                                check_res = check_bigo_native_api(order.get('game_uid'))
+                                                if check_res.get('status') == 'success':
+                                                    nickname = check_res.get('username')
+                                            except: pass
+                                        inputs["input2"] = nickname or "User" 
                                     elif order.get('server_region'):
                                         inputs["input2"] = order.get('server_region')
                                 else:
