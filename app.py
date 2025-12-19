@@ -647,7 +647,7 @@ def hitpay_webhook_handler():
                                         supplier_refs.append(create_resp.get('referenceno'))
                                     elif create_resp.get('code') == 101:
                                         supplier_refs.append(create_resp.get('referenceno'))
-                                        all_success = False # Stay in processing
+                                        all_success = False 
                                     else:
                                         all_success, _ = False, failed_items.append(f"{item.get('name')} (Err: {create_resp.get('message')})")
                                 else:
@@ -705,23 +705,12 @@ def gamepoint_callback():
         pin1, pin2, message = data.get('pin1'), data.get('pin2'), data.get('message')
         if not merchant_code:
             return Response("OK", status=200, mimetype='text/plain')
-        
-        # Try finding by exact supplier ref match first
         order_res = supabase.table('orders').select('*').ilike('supplier_ref', f"%{merchant_code}%").execute()
-        
         if not order_res.data:
-            # Fallback: Try to find by order ID prefix embedded in merchant_code
-            # merchant_code format is often: "{uuid_prefix}-{timestamp}-{random}"
             possible_id = merchant_code.split('-')[0]
-            
-            # FIX: Cast UUID 'id' to text for ILIKE comparison
-            # Postgres error 42883 occurs if we ilike a UUID column directly
             order_res = supabase.table('orders').select('*').ilike('id::text', f"{possible_id}%").execute()
-            
         if not order_res.data:
-            # Order not found, but we still return OK to stop GamePoint from retrying forever
             return Response("OK", status=200, mimetype='text/plain')
-            
         order = order_res.data[0]
         if status_code == '100': 
             voucher_data = {"pin1": pin1, "pin2": pin2, "message": message}
@@ -731,8 +720,49 @@ def gamepoint_callback():
         return Response("OK", status=200, mimetype='text/plain')
     except Exception as e:
         logging.error(f"GP Callback Error: {e}")
-        # Return OK even on internal error to prevent callback loops if the logic is broken
         return Response("OK", status=200, mimetype='text/plain')
+
+@app.route('/api/admin/orders/<order_id>/sync', methods=['POST'])
+@admin_required
+def admin_sync_order(order_id):
+    try:
+        order_res = supabase.table('orders').select('*').eq('id', order_id).single().execute()
+        order = order_res.data
+        if not order: return jsonify({"status": "error", "message": "Order not found"}), 404
+
+        supplier_ref = order.get('supplier_ref')
+        
+        if not supplier_ref:
+             return jsonify({"status": "error", "message": "Cannot sync: No Supplier Reference (GPxxxx) found in database."}), 400
+
+        gp = GamePointService(supabase_client=supabase)
+        
+        resp = gp.check_order_status(supplier_ref)
+        
+        if resp.get('code') == 100:
+            pin1 = resp.get('pin1')
+            pin2 = resp.get('pin2')
+            
+            voucher_data = {"pin1": pin1, "pin2": pin2, "message": "Synced from Supplier"}
+            
+            supabase.table('orders').update({
+                'status': 'completed',
+                'voucher_codes': voucher_data,
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', order_id).execute()
+            
+            return jsonify({"status": "success", "message": "Order synced and codes retrieved!", "data": voucher_data})
+            
+        elif resp.get('code') == 102:
+             supabase.table('orders').update({'status': 'failed'}).eq('id', order_id).execute()
+             return jsonify({"status": "success", "message": "Order synced: Supplier marked as Failed."})
+             
+        else:
+            return jsonify({"status": "error", "message": f"Supplier response: {resp.get('message')}"})
+
+    except Exception as e:
+        logging.error(f"Sync Error: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=port, debug=False)
