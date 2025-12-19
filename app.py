@@ -226,14 +226,6 @@ def check_netease_api(game_path, server_id, role_id):
     except Exception: return {"status": "error", "message": "API Error"}
 
 def check_ace_racer_api(uid, gp_server_id):
-    # Mapping GamePoint Server IDs to NetEase Real Server IDs
-    # Based on observation: 105xx -> 100xx
-    # 10501 -> 10001 (Japan)
-    # 10511 -> 10011 (Korea)
-    # 10521 -> 10021 (Asia)
-    # 10531 -> 10031 (North America)
-    # 10541 -> 10041 (Europe)
-    
     mapping = {
         "10501": "10001",
         "10511": "10011",
@@ -241,11 +233,7 @@ def check_ace_racer_api(uid, gp_server_id):
         "10531": "10031",
         "10541": "10041"
     }
-    
-    # If the ID passed is in our map, convert it. Otherwise try using it as is.
     real_sid = mapping.get(str(gp_server_id), str(gp_server_id))
-    
-    # Pass 'aceracer' as path (verified via logs)
     return check_netease_api("aceracer", real_sid, uid)
 
 def check_razer_hoyoverse_api(api_path, referer, server_map, uid, server_name):
@@ -641,7 +629,12 @@ def hitpay_webhook_handler():
                         inputs = {}
                         if game.get('requires_user_id') != False:
                             inputs["input1"] = order.get('game_uid')
-                            if order.get('server_region'): inputs["input2"] = order.get('server_region')
+                            
+                            # UPDATED: Automatically map validated username to input2 for Bigo
+                            if game.get('game_key') == 'bigo-live-direct-id' or 'bigo' in game.get('name', '').lower():
+                                inputs["input2"] = order.get('game_nickname')
+                            elif order.get('server_region'):
+                                inputs["input2"] = order.get('server_region')
                         else:
                             inputs["input1"] = "GIFT_CARD"
                             
@@ -691,7 +684,12 @@ def hitpay_webhook_handler():
                                 inputs = {}
                                 if game.get('requires_user_id') != False:
                                     inputs["input1"] = order.get('game_uid')
-                                    if order.get('server_region'): inputs["input2"] = order.get('server_region')
+                                    
+                                    # UPDATED: Automatically map validated username to input2 for Bigo
+                                    if game.get('game_key') == 'bigo-live-direct-id' or 'bigo' in game.get('name', '').lower():
+                                        inputs["input2"] = order.get('game_nickname')
+                                    elif order.get('server_region'):
+                                        inputs["input2"] = order.get('server_region')
                                 else:
                                     inputs["input1"] = "GIFT_CARD"
                                 val_resp = gp_api.validate_id(gp_prod_id, inputs)
