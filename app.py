@@ -334,7 +334,7 @@ VALIDATION_HANDLERS = {
     "ragnarok_x_next_gen": lambda uid, sid, cfg: check_nuverse_api("3402", uid),
     "snowbreak": lambda uid, sid, cfg: check_razer_api("seasun-games-snowbreak-containment-zone", uid, snowbreak_servers.get(sid)),
     "delta_force": lambda uid, sid, cfg: check_garena_api("100151", uid),
-    "ace_racer": lambda uid, sid, cfg: check_netease_api("aceracer", sid, uid),
+"ace_racer": lambda uid, sid, cfg: check_netease_api("aceracerglobal", sid, uid),
 }
 
 @app.route('/')
