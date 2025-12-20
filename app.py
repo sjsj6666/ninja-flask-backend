@@ -40,8 +40,12 @@ limiter = Limiter(
     storage_uri="memory://"
 )
 
-allowed_origins_str = os.environ.get('ALLOWED_ORIGINS', "http://127.0.1:5173,http://localhost:5173,https://www.gameuniverse.co")
-allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
+allowed_origins_str = os.environ.get('ALLOWED_ORIGINS', "*")
+if allowed_origins_str == "*":
+    allowed_origins = "*"
+else:
+    allowed_origins = [origin.strip() for origin in allowed_origins_str.split(',')]
+
 CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -319,9 +323,7 @@ hsr_servers = {"Asia": "prod_official_asia", "America": "prod_official_usa", "Eu
 zzz_servers = {"Asia": "prod_gf_jp", "America": "prod_gf_us", "Europe": "prod_gf_eu", "TW/HK/MO": "prod_gf_sg"}
 snowbreak_servers = {"Asia": "225", "SEA": "215", "Americas": "235", "Europe": "245"}
 
-# --- HANDLER CONFIGURATION MAP ---
 HANDLER_METADATA = {
-    # Specific / Native Handlers (Auto-configured IDs)
     "bigo_live": { 
         "label": "⚡ Specific: Bigo Live (Direct)", 
         "server": False, "region": False, 
@@ -357,16 +359,12 @@ HANDLER_METADATA = {
         "server": True, "region": False, 
         "default_target": "aceracer" 
     },
-
-    # Universal Handlers
     "universal_mlbb": { "label": "🟢 Universal: Mobile Legends", "server": True, "region": False },
     "universal_netease": { "label": "🟢 Universal: NetEase", "server": True, "region": False },
     "universal_smile_one": { "label": "🟢 Universal: SmileOne", "server": True, "region": False },
     "universal_gamingnp": { "label": "🟢 Universal: GamingNP", "server": False, "region": False },
     "universal_spacegaming": { "label": "🟢 Universal: SpaceGaming", "server": False, "region": False },
     "universal_razer": { "label": "🟢 Universal: Razer", "server": True, "region": False },
-    
-    # Legacy
     "pubgm_global": { "label": "Legacy: PUBG Mobile", "server": False, "region": False, "default_target": "pubgm" },
     "honor_of_kings": { "label": "Legacy: Honor of Kings", "server": False, "region": False, "default_target": "hok" },
     "identity_v": { "label": "Legacy: Identity V", "server": False, "region": True, "default_target": "identityv" },
@@ -387,14 +385,12 @@ VALIDATION_HANDLERS = {
     "honkai_star_rail": lambda uid, sid, cfg: check_razer_hoyoverse_api(cfg['target_id'], "hsr", hsr_servers, uid, sid),
     "zenless_zone_zero": lambda uid, sid, cfg: check_razer_hoyoverse_api(cfg['target_id'], "zenless-zone-zero", zzz_servers, uid, sid),
     "ace_racer": lambda uid, sid, cfg: check_ace_racer_api(uid, sid),
-    
     "universal_mlbb": lambda uid, sid, cfg: perform_ml_check(uid, sid),
     "universal_netease": lambda uid, sid, cfg: check_netease_api(cfg['target_id'], sid, uid),
     "universal_smile_one": lambda uid, sid, cfg: check_smile_one_api(cfg['target_id'], uid, sid),
     "universal_gamingnp": lambda uid, sid, cfg: check_gamingnp_api(cfg['target_id'], uid),
     "universal_spacegaming": lambda uid, sid, cfg: check_spacegaming_api(cfg['target_id'], uid),
     "universal_razer": lambda uid, sid, cfg: check_razer_api(cfg['target_id'], uid, sid),
-    
     "pubgm_global": lambda uid, sid, cfg: check_gamingnp_api(cfg['target_id'], uid),
     "honor_of_kings": lambda uid, sid, cfg: check_gamingnp_api(cfg['target_id'], uid),
     "identity_v": lambda uid, sid, cfg: check_netease_api(cfg['target_id'], {"Asia": "2001", "NA-EU": "2011"}.get(sid), uid),
@@ -411,6 +407,141 @@ VALIDATION_HANDLERS = {
 @app.route('/api/admin/config/handlers', methods=['GET'])
 def get_api_handlers():
     return jsonify(HANDLER_METADATA)
+
+@app.route('/api/admin/gamepoint/catalog', methods=['GET'])
+@admin_required
+@error_handler
+def admin_get_gp_catalog():
+    cached_catalog = cache.get("admin_gp_full_catalog")
+    if cached_catalog:
+        return jsonify(cached_catalog)
+    gp = GamePointService(supabase_client=supabase)
+    token = gp.get_token()
+    try:
+        list_resp = gp._request("product/list", {"token": token})
+        products = list_resp.get('detail', [])
+    except Exception as e:
+        logging.error(f"Failed to fetch product list: {e}")
+        return jsonify([])
+    full_catalog = []
+    session = requests.Session()
+    adapter = HTTPAdapter(pool_connections=30, pool_maxsize=30, max_retries=Retry(total=3, backoff_factor=0.5))
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    session.headers.update({'Content-Type': 'application/json', 'partnerid': gp.partner_id, 'User-Agent': 'GameVault/1.0'})
+    proxies = gp.proxies
+    base_url = gp.base_url
+    secret_key = gp.secret_key
+    def fetch_detail_optimized(product):
+        try:
+            payload = {"token": token, "productid": product['id'], "timestamp": int(time.time())}
+            encoded_payload = jwt.encode(payload, secret_key, algorithm='HS256')
+            body = json.dumps({"payload": encoded_payload})
+            resp = session.post(f"{base_url}/product/detail", data=body, proxies=proxies, timeout=15, verify=certifi.where())
+            detail_data = resp.json()
+            if detail_data.get('code') == 200:
+                product['packages'] = detail_data.get('package', [])
+                product['fields'] = detail_data.get('fields', [])
+                product['server'] = detail_data.get('server', [])
+                return product
+        except Exception as e:
+            logging.error(f"Error fetching product {product['id']}: {e}")
+        return None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+        futures = {executor.submit(fetch_detail_optimized, p): p for p in products}
+        for future in concurrent.futures.as_completed(futures):
+            result = future.result()
+            if result:
+                full_catalog.append(result)
+    cache.set("admin_gp_full_catalog", full_catalog, expire_seconds=3600)
+    return jsonify(full_catalog)
+
+@app.route('/api/admin/gamepoint/list', methods=['GET'])
+@admin_required
+@error_handler
+def admin_get_gp_game_list():
+    gp = GamePointService(supabase_client=supabase)
+    token = gp.get_token()
+    list_resp = gp._request("product/list", {"token": token})
+    products = list_resp.get('detail', [])
+    return jsonify(products)
+
+@app.route('/api/admin/gamepoint/detail/<int:product_id>', methods=['GET'])
+@admin_required
+@error_handler
+def admin_get_gp_game_detail(product_id):
+    gp = GamePointService(supabase_client=supabase)
+    token = gp.get_token()
+    detail_resp = gp._request("product/detail", {"token": token, "productid": product_id})
+    if detail_resp.get('code') == 200:
+        return jsonify(detail_resp.get('package', []))
+    return jsonify([])
+
+@app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
+@admin_required
+def admin_download_gp_csv():
+    try:
+        gp = GamePointService(supabase_client=supabase)
+        token = gp.get_token()
+        list_resp = gp._request("product/list", {"token": token})
+        products = list_resp.get('detail', [])
+        if not products:
+            return jsonify({"status": "error", "message": "No products found"}), 404
+        def fetch_detail_safe(product):
+            try:
+                detail_resp = gp._request("product/detail", {"token": token, "productid": product['id']})
+                if detail_resp.get('code') == 200:
+                    return { "parent": product, "packages": detail_resp.get('package', []) }
+            except Exception as e:
+                logging.error(f"Error fetching product {product['id']}: {e}")
+            return None
+        def generate_csv():
+            yield u'\ufeff' 
+            yield "Product ID,Product Name,Package ID,Package Name,Cost Price\n"
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+                futures = {executor.submit(fetch_detail_safe, p): p for p in products}
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    if result:
+                        p = result['parent']
+                        p_name = p['name'].replace(',', ' ')
+                        for pkg in result['packages']:
+                            row = [str(p['id']), p_name, str(pkg['id']), pkg['name'].replace(',', ' '), str(pkg['price'])]
+                            yield ",".join(row) + "\n"
+        return Response(stream_with_context(generate_csv()), mimetype="text/csv", headers={"Content-Disposition": f"attachment; filename=gamepoint_catalog_{gp.config['mode']}.csv", "Cache-Control": "no-cache"})
+    except Exception as e:
+        logging.error(f"CSV Download Failed: {str(e)}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/admin/gamepoint/config', methods=['GET', 'POST'])
+@admin_required
+@error_handler
+def admin_gamepoint_config():
+    if request.method == 'POST':
+        data = request.get_json()
+        updates = []
+        allowed_keys = ['gamepoint_mode', 'gamepoint_partner_id_sandbox', 'gamepoint_secret_key_sandbox', 'gamepoint_partner_id_live', 'gamepoint_secret_key_live', 'gamepoint_proxy_url']
+        for key, val in data.items():
+            if key in allowed_keys:
+                updates.append({'key': key, 'value': val})
+        if updates:
+            supabase.table('settings').upsert(updates, on_conflict='key').execute()
+            from redis_cache import cache
+            cache.delete(f"gamepoint_token_{data.get('gamepoint_mode', 'sandbox')}")
+        return jsonify({"status": "success", "message": "Settings updated"})
+    response = supabase.table('settings').select('key,value').ilike('key', 'gamepoint%').execute()
+    settings = {item['key']: item['value'] for item in response.data}
+    for k in ['gamepoint_secret_key_live', 'gamepoint_secret_key_sandbox', 'gamepoint_proxy_url']:
+        if settings.get(k): settings[k] = "********"
+    return jsonify({"status": "success", "data": settings})
+
+@app.route('/admin/gamepoint/balance', methods=['GET'])
+@admin_required
+@error_handler
+def admin_gamepoint_balance():
+    gp = GamePointService(supabase_client=supabase)
+    balance = gp.check_balance()
+    return jsonify({"status": "success", "mode": gp.config['mode'], "balance": balance})
 
 @app.route('/check-id/<game_slug>/<uid>/', defaults={'server_id': None})
 @app.route('/check-id/<game_slug>/<uid>/<server_id>')
@@ -553,6 +684,7 @@ def hitpay_webhook_handler():
                         if game.get('requires_user_id') != False:
                             inputs["input1"] = order.get('game_uid')
                             
+                            # UPDATED: Automatically map validated username to input2 for Bigo
                             if game.get('game_key') == 'bigo-live-direct-id' or 'bigo' in game.get('name', '').lower():
                                 nickname = order.get('game_nickname')
                                 if not nickname:
