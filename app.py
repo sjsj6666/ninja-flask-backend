@@ -854,7 +854,6 @@ def admin_sync_order(order_id):
     except Exception as e:
         logging.error(f"Sync Error: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
-
 @app.route('/api/admin/orders/<order_id>/process', methods=['POST'])
 @admin_required
 def admin_process_manual_order(order_id):
@@ -873,22 +872,13 @@ def admin_process_manual_order(order_id):
         # 2. Basic Validations
         if order['status'] == 'completed':
              return jsonify({"status": "error", "message": "Order is already completed"}), 400
-             
-        # Allow processing if status is 'processing', 'verifying', or 'manual_review'
-        # For manual topup, we usually set it to 'processing' initially.
 
         if not order.get('order_items'):
              return jsonify({"status": "error", "message": "Order has no items"}), 400
 
         product = order['order_items'][0]['products']
         game = product.get('games', {})
-        product_name = product.get('name')
-        game_name = game.get('name', 'GameVault Product')
         
-        # Admin is the customer in this context, or the user they entered
-        customer_email = order.get('email', 'admin@gameuniverse.co')
-        customer_name = order.get('remitter_name', 'Admin')
-
         gp_api = GamePointService(supabase_client=supabase)
         supplier_config = product.get('supplier_config')
         
@@ -907,7 +897,6 @@ def admin_process_manual_order(order_id):
                 # Special Logic for Bigo / Nicknames
                 if game.get('game_key') == 'bigo-live-direct-id' or 'bigo' in game.get('name', '').lower():
                     nickname = order.get('game_nickname')
-                    # Try to fetch nickname if missing
                     if not nickname:
                         try:
                             check_res = check_bigo_native_api(order.get('game_uid'))
@@ -923,23 +912,22 @@ def admin_process_manual_order(order_id):
             for item in supplier_config:
                 gp_pack_id = item.get('packageId')
                 
-                # (Optional) Price Check Logic can be skipped for Admin overrides, 
-                # but let's keep it safe or wrap in try/except to not block admins.
-                
                 try:
                     val_resp = gp_api.validate_id(item.get('gameId'), inputs)
                     val_token = val_resp.get('validation_token')
                     
                     if val_token:
-                        # Unique ref for every item
                         merchant_ref = f"{order_id[:8]}-{int(time.time())}-{random.randint(100,999)}"
                         create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
                         
+                        # ALWAYS SAVE REF NO IF IT EXISTS
+                        if create_resp.get('referenceno'):
+                            supplier_refs.append(create_resp.get('referenceno'))
+
                         if create_resp.get('code') == 100:
-                            supplier_refs.append(create_resp.get('referenceno'))
+                            pass # Success
                         elif create_resp.get('code') == 101:
-                            supplier_refs.append(create_resp.get('referenceno'))
-                            all_success = False # Pending is not full success yet
+                            all_success = False # Pending
                         else:
                             all_success = False
                             failed_items.append(f"{item.get('name')} (Err: {create_resp.get('message')})")
@@ -950,25 +938,17 @@ def admin_process_manual_order(order_id):
                     all_success = False
                     failed_items.append(f"{item.get('name')} (Exception: {str(e)})")
             
+            # Update DB with refs regardless of success/fail
+            update_data = {'supplier_ref': ', '.join(supplier_refs)}
+
             if all_success:
-                supabase.table('orders').update({
-                    'status': 'completed', 
-                    'supplier_ref': ', '.join(supplier_refs),
-                    'completed_at': datetime.utcnow().isoformat()
-                }).eq('id', order_id).execute()
-                
-                # Send email (optional for admin manual orders, but good for records)
-                # send_order_update({**order, 'status': 'completed'}, product_name, game_name, customer_email, customer_name)
-                
+                update_data.update({'status': 'completed', 'completed_at': datetime.utcnow().isoformat()})
+                supabase.table('orders').update(update_data).eq('id', order_id).execute()
                 return jsonify({"status": "success", "message": "Order processed successfully", "supplier_refs": supplier_refs})
             else:
-                supabase.table('orders').update({
-                    'status': 'manual_review', 
-                    'notes': f"Manual Process Failed: {'; '.join(failed_items)}", 
-                    'supplier_ref': ', '.join(supplier_refs)
-                }).eq('id', order_id).execute()
-                
-                return jsonify({"status": "error", "message": f"Partial/Fail: {'; '.join(failed_items)}"}), 400
+                update_data.update({'status': 'manual_review', 'notes': f"Manual Process Failed: {'; '.join(failed_items)}"})
+                supabase.table('orders').update(update_data).eq('id', order_id).execute()
+                return jsonify({"status": "error", "message": f"Partial/Fail: {'; '.join(failed_items)}", "supplier_refs": supplier_refs}), 400
         
         else:
             # Handle Direct Mapping (Simple Product)
@@ -1002,23 +982,26 @@ def admin_process_manual_order(order_id):
                         merchant_ref = f"{order_id[:8]}-{int(time.time())}"
                         create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
                         
+                        # Prepare update data with supplier ref ALWAYS
+                        update_data = {}
+                        if create_resp.get('referenceno'):
+                             update_data['supplier_ref'] = create_resp.get('referenceno')
+
                         if create_resp.get('code') == 100:
-                            supabase.table('orders').update({
-                                'status': 'completed', 
-                                'supplier_ref': create_resp.get('referenceno'),
-                                'completed_at': datetime.utcnow().isoformat()
-                            }).eq('id', order_id).execute()
-                            
+                            update_data.update({'status': 'completed', 'completed_at': datetime.utcnow().isoformat()})
+                            supabase.table('orders').update(update_data).eq('id', order_id).execute()
                             return jsonify({"status": "success", "message": "Order processed successfully", "ref": create_resp.get('referenceno')})
                             
                         elif create_resp.get('code') == 101:
-                            supabase.table('orders').update({'status': 'processing', 'supplier_ref': create_resp.get('referenceno')}).eq('id', order_id).execute()
+                            update_data.update({'status': 'processing'})
+                            supabase.table('orders').update(update_data).eq('id', order_id).execute()
                             return jsonify({"status": "pending", "message": "Order pending at supplier", "ref": create_resp.get('referenceno')})
                             
                         else:
                             error_msg = create_resp.get('message')
-                            supabase.table('orders').update({'status': 'manual_review', 'notes': f"Manual Fail: {error_msg}"}).eq('id', order_id).execute()
-                            return jsonify({"status": "error", "message": f"Supplier Error: {error_msg}"}), 400
+                            update_data.update({'status': 'manual_review', 'notes': f"Manual Fail: {error_msg}"})
+                            supabase.table('orders').update(update_data).eq('id', order_id).execute()
+                            return jsonify({"status": "error", "message": f"Supplier Error: {error_msg}", "ref": create_resp.get('referenceno')}), 400
                     else:
                         msg = val_resp.get('message', 'Validation Failed')
                         supabase.table('orders').update({'status': 'manual_review', 'notes': msg}).eq('id', order_id).execute()
