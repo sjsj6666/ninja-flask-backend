@@ -1,3 +1,5 @@
+# app.py
+
 import os
 import logging
 import time
@@ -474,8 +476,11 @@ def admin_get_gp_game_detail(product_id):
     token = gp.get_token()
     detail_resp = gp._request("product/detail", {"token": token, "productid": product_id})
     if detail_resp.get('code') == 200:
-        return jsonify(detail_resp.get('package', []))
-    return jsonify([])
+        return jsonify({
+            "packages": detail_resp.get('package', []),
+            "servers": detail_resp.get('server', [])
+        })
+    return jsonify({"packages": [], "servers": []})
 
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
 @admin_required
