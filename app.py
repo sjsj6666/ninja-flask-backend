@@ -1,5 +1,3 @@
-# app.py
-
 import os
 import logging
 import time
@@ -32,6 +30,7 @@ from redis_cache import cache
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from email_service import send_order_update
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
 
@@ -139,17 +138,87 @@ def get_hitpay_config():
     else:
         return {'url': 'https://api.sandbox.hit-pay.com/v1/payment-requests', 'key': settings.get('hitpay_api_key_sandbox'), 'salt': settings.get('hitpay_salt_sandbox')}
 
+def check_mlbb_pizzoshop(user_id, zone_id):
+    """
+    Scrapes pizzoshop.com to get the exact Region and Nickname.
+    """
+    url = "https://pizzoshop.com/mlchecker/check"
+    
+    # Headers exactly matching a real browser to avoid being blocked
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Origin": "https://pizzoshop.com",
+        "Referer": "https://pizzoshop.com/mlchecker",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    }
+    
+    data = {
+        "user_id": user_id,
+        "zone_id": zone_id
+    }
+
+    try:
+        # Use existing PROXY_DICT to prevent server IP block
+        response = requests.post(url, data=data, headers=headers, timeout=10, proxies=PROXY_DICT)
+
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Find the success header (Based on PizzoShop structure)
+            if soup.find("h4", class_="text-success"):
+                nickname = "Unknown"
+                region = "Global"
+                
+                # Loop through the table rows <tr> to find the data
+                rows = soup.find_all("tr")
+                for row in rows:
+                    th = row.find("th") # Header (e.g., "Region ID")
+                    td = row.find("td") # Value (e.g., "Malaysia")
+                    
+                    if th and td:
+                        header_text = th.get_text(strip=True)
+                        value_text = td.get_text(strip=True)
+                        
+                        if "Nickname" in header_text:
+                            nickname = value_text
+                        elif "Region ID" in header_text:
+                            region = value_text
+                
+                return {
+                    "status": "success",
+                    "username": nickname,
+                    "region": region  # Returns "Malaysia", "Indonesia", etc.
+                }
+    except Exception as e:
+        logging.error(f"PizzoShop Scrape Error: {e}")
+
+    return None
+
 def perform_ml_check(user_id, zone_id):
+    # 1. Try PizzoShop Scraper (Priority: Gives specific Region)
+    pizzo_result = check_mlbb_pizzoshop(user_id, zone_id)
+    if pizzo_result:
+        return pizzo_result
+
+    # 2. Fallback: Caliph API (Fast, but region is generic)
     try:
         api_url = "https://cekidml.caliph.dev/api/validasi"
         params = {'id': user_id, 'serverid': zone_id}
-        response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=7, proxies=None)
+        response = requests.get(api_url, params=params, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
+        
         if response.status_code == 200:
             data = response.json()
             if data.get("status") == "success" and data.get("result", {}).get("nickname"):
-                return {'status': 'success', 'username': data["result"]["nickname"], 'region': 'N/A'}
+                return {
+                    'status': 'success', 
+                    'username': data["result"]["nickname"], 
+                    'region': 'Global/Unknown' # Fallback region
+                }
     except Exception:
         pass
+
+    # 3. Final Fallback (Your existing logic)
     return check_smile_one_api("mobilelegends", user_id, zone_id)
 
 def check_smile_one_api(game_code, uid, server_id=None):
@@ -476,11 +545,8 @@ def admin_get_gp_game_detail(product_id):
     token = gp.get_token()
     detail_resp = gp._request("product/detail", {"token": token, "productid": product_id})
     if detail_resp.get('code') == 200:
-        return jsonify({
-            "packages": detail_resp.get('package', []),
-            "servers": detail_resp.get('server', [])
-        })
-    return jsonify({"packages": [], "servers": []})
+        return jsonify(detail_resp.get('package', []))
+    return jsonify([])
 
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
 @admin_required
