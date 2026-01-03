@@ -19,3 +19,4 @@ PyJWT
 pandas
 redis
 sentry-sdk[flask]
+beautifulsoup4
