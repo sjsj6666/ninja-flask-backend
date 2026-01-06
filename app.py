@@ -1,8 +1,4 @@
-Here are the full, updated files with the necessary fixes applied.
 
-### 1. `app.py`
-
-```python
 import os
 import logging
 import time
