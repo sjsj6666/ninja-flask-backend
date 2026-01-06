@@ -1,3 +1,8 @@
+Here are the full, updated files with the necessary fixes applied.
+
+### 1. `app.py`
+
+```python
 import os
 import logging
 import time
@@ -144,7 +149,6 @@ def check_mlbb_pizzoshop(user_id, zone_id):
     """
     url = "https://pizzoshop.com/mlchecker/check"
     
-    # Headers exactly matching a real browser to avoid being blocked
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Content-Type": "application/x-www-form-urlencoded",
@@ -159,22 +163,19 @@ def check_mlbb_pizzoshop(user_id, zone_id):
     }
 
     try:
-        # Use existing PROXY_DICT to prevent server IP block
         response = requests.post(url, data=data, headers=headers, timeout=10, proxies=PROXY_DICT)
 
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
 
-            # Find the success header (Based on PizzoShop structure)
             if soup.find("h4", class_="text-success"):
                 nickname = "Unknown"
                 region = "Global"
                 
-                # Loop through the table rows <tr> to find the data
                 rows = soup.find_all("tr")
                 for row in rows:
-                    th = row.find("th") # Header (e.g., "Region ID")
-                    td = row.find("td") # Value (e.g., "Malaysia")
+                    th = row.find("th")
+                    td = row.find("td")
                     
                     if th and td:
                         header_text = th.get_text(strip=True)
@@ -188,7 +189,7 @@ def check_mlbb_pizzoshop(user_id, zone_id):
                 return {
                     "status": "success",
                     "username": nickname,
-                    "region": region  # Returns "Malaysia", "Indonesia", etc.
+                    "region": region
                 }
     except Exception as e:
         logging.error(f"PizzoShop Scrape Error: {e}")
@@ -196,12 +197,10 @@ def check_mlbb_pizzoshop(user_id, zone_id):
     return None
 
 def perform_ml_check(user_id, zone_id):
-    # 1. Try PizzoShop Scraper (Priority: Gives specific Region)
     pizzo_result = check_mlbb_pizzoshop(user_id, zone_id)
     if pizzo_result:
         return pizzo_result
 
-    # 2. Fallback: Caliph API (Fast, but region is generic)
     try:
         api_url = "https://cekidml.caliph.dev/api/validasi"
         params = {'id': user_id, 'serverid': zone_id}
@@ -213,12 +212,11 @@ def perform_ml_check(user_id, zone_id):
                 return {
                     'status': 'success', 
                     'username': data["result"]["nickname"], 
-                    'region': 'Global/Unknown' # Fallback region
+                    'region': 'Global/Unknown'
                 }
     except Exception:
         pass
 
-    # 3. Final Fallback (Your existing logic)
     return check_smile_one_api("mobilelegends", user_id, zone_id)
 
 def check_smile_one_api(game_code, uid, server_id=None):
@@ -544,9 +542,13 @@ def admin_get_gp_game_detail(product_id):
     gp = GamePointService(supabase_client=supabase)
     token = gp.get_token()
     detail_resp = gp._request("product/detail", {"token": token, "productid": product_id})
-    if detail_resp.get('code') == 200:
-        return jsonify(detail_resp.get('package', []))
-    return jsonify([])
+    if detail_resp.get('code') != 200:
+        return jsonify({
+            "error": True, 
+            "message": detail_resp.get('message', 'Unknown Supplier Error'),
+            "code": detail_resp.get('code')
+        }), 400
+    return jsonify(detail_resp.get('package', []))
 
 @app.route('/api/admin/gamepoint/download-csv', methods=['GET'])
 @admin_required
@@ -755,7 +757,6 @@ def hitpay_webhook_handler():
                         if game.get('requires_user_id') != False:
                             inputs["input1"] = order.get('game_uid')
                             
-                            # UPDATED: Automatically map validated username to input2 for Bigo
                             if game.get('game_key') == 'bigo-live-direct-id' or 'bigo' in game.get('name', '').lower():
                                 nickname = order.get('game_nickname')
                                 if not nickname:
@@ -928,19 +929,13 @@ def admin_sync_order(order_id):
 @app.route('/api/admin/orders/<order_id>/process', methods=['POST'])
 @admin_required
 def admin_process_manual_order(order_id):
-    """
-    Manually triggers the fulfillment process for an order.
-    Used for Manual Top-ups or retrying failed API calls.
-    """
     try:
-        # 1. Fetch the Order and related data
         order_data = supabase.table('orders').select('*, order_items(*, products(*, games(*)))').eq('id', order_id).single().execute()
         order = order_data.data
         
         if not order:
             return jsonify({"status": "error", "message": "Order not found"}), 404
 
-        # 2. Basic Validations
         if order['status'] == 'completed':
              return jsonify({"status": "error", "message": "Order is already completed"}), 400
 
@@ -953,10 +948,7 @@ def admin_process_manual_order(order_id):
         gp_api = GamePointService(supabase_client=supabase)
         supplier_config = product.get('supplier_config')
         
-        # --- LOGIC COPIED & ADAPTED FROM WEBHOOK HANDLER ---
-        
         if supplier_config:
-            # Handle Bundle/Configured Products
             all_success = True
             failed_items = []
             supplier_refs = []
@@ -965,7 +957,6 @@ def admin_process_manual_order(order_id):
             if game.get('requires_user_id') != False:
                 inputs["input1"] = order.get('game_uid')
                 
-                # Special Logic for Bigo / Nicknames
                 if game.get('game_key') == 'bigo-live-direct-id' or 'bigo' in game.get('name', '').lower():
                     nickname = order.get('game_nickname')
                     if not nickname:
@@ -991,14 +982,13 @@ def admin_process_manual_order(order_id):
                         merchant_ref = f"{order_id[:8]}-{int(time.time())}-{random.randint(100,999)}"
                         create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
                         
-                        # ALWAYS SAVE REF NO IF IT EXISTS
                         if create_resp.get('referenceno'):
                             supplier_refs.append(create_resp.get('referenceno'))
 
                         if create_resp.get('code') == 100:
-                            pass # Success
+                            pass 
                         elif create_resp.get('code') == 101:
-                            all_success = False # Pending
+                            all_success = False 
                         else:
                             all_success = False
                             failed_items.append(f"{item.get('name')} (Err: {create_resp.get('message')})")
@@ -1009,7 +999,6 @@ def admin_process_manual_order(order_id):
                     all_success = False
                     failed_items.append(f"{item.get('name')} (Exception: {str(e)})")
             
-            # Update DB with refs regardless of success/fail
             update_data = {'supplier_ref': ', '.join(supplier_refs)}
 
             if all_success:
@@ -1022,7 +1011,6 @@ def admin_process_manual_order(order_id):
                 return jsonify({"status": "error", "message": f"Partial/Fail: {'; '.join(failed_items)}", "supplier_refs": supplier_refs}), 400
         
         else:
-            # Handle Direct Mapping (Simple Product)
             gp_prod_id = product.get('gamepoint_product_id')
             gp_pack_id = product.get('gamepoint_package_id')
             
@@ -1053,7 +1041,6 @@ def admin_process_manual_order(order_id):
                         merchant_ref = f"{order_id[:8]}-{int(time.time())}"
                         create_resp = gp_api.create_order(gp_pack_id, val_token, merchant_ref)
                         
-                        # Prepare update data with supplier ref ALWAYS
                         update_data = {}
                         if create_resp.get('referenceno'):
                              update_data['supplier_ref'] = create_resp.get('referenceno')
